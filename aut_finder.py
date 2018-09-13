@@ -1,5 +1,4 @@
-from skimage import transform,draw,feature,io,filters,segmentation,color
-
+from skimage import transform,draw,feature,io,filters,segmentation,color,exposure
 from skimage.draw import ellipse_perimeter
 from matplotlib import patches
 from collections import defaultdict
@@ -18,24 +17,24 @@ class Follicle():
         self.bbox = defaultdict()
 
     def add_inner(self,slice_num,inner_pts):
-        if slice_num in self.keys():
+        if slice_num in self.inner.keys():
             print('Overwriting previous tracking on slice {}'.format(slice_num))
         else:
             self.inner[slice_num] = inner_pts
 
 
     def add_outer(self,slice_num,outer_pts):
-        if slice_num in self.keys():
+        if slice_num in self.outer.keys():
             print('Overwriting previous tracking on slice {}'.format(slice_num))
         else:
             self.outer[slice_num] = outer_pts
 
 
     def add_bbox(self,slice_num,box):
-        if slice_num in self.keys():
+        if slice_num in self.bbox.keys():
             print('Overwriting previous tracking on slice {}'.format(slice_num))
         else:
-            self.inner[slice_num] = box
+            self.bbox[slice_num] = box
 
 
 def ginput2boundingbox(a,b,mode='mask'):
@@ -82,7 +81,7 @@ def zoom_to_box(ax,box):
     ax.invert_yaxis()
 
 
-def user_get_fol_bounds(I,major_box,fol_dict=None):
+def user_get_fol_bounds(I,major_box,slice_num,fol_dict=None):
     """
     Asks the user to pick out bounding boxes on individual follicles
     This should only be run at the beginning -- Needs development
@@ -112,7 +111,7 @@ def user_get_fol_bounds(I,major_box,fol_dict=None):
         ax.add_patch(rect)
         ax.text(coord[0],coord[1],'{}'.format(count),color='c',fontsize=16)
         F = Follicle(count)
-        F.bbox = box
+        F.add_bbox(slice_num,box)
         fol_dict[count] = F
     plt.close('all')
     return(fol_dict)
@@ -160,9 +159,11 @@ def extract_mask(I_sub):
     :param I_sub: Sub image of just the follicel ROI
     :return:
     """
+    I_sub = exposure.equalize_hist(I_sub)
     T = filters.threshold_yen(I_sub)
+
     bw = I_sub<T
-    bw = closing(bw,disk(9))
+    bw = closing(bw,disk(5))
     region_labels = label(bw)
     props = regionprops(region_labels)
     largest_idx = np.argsort([r.area for r in props])[-1]
@@ -185,24 +186,29 @@ def extract_mask(I_sub):
     return(inner,outer,bbox)
 
 
-def hough_ellipse_finder():
+def hough_ellipse_finder(I_sub):
     """
     Probably wont need
     :return:
     """
-    result = hough_ellipse(edges, accuracy=20, threshold=250,
-                           min_size=100, max_size=120)
+    edges = feature.canny(I_sub,sigma=2.0)
+    result = transform.hough_ellipse(edges, accuracy=20, threshold=250,
+                           min_size=100)
     result.sort(order='accumulator')
+
     for ii in range(1,3):
-        best = list(result[-ii])
-        yc, xc, a, b = [int(round(x)) for x in best[1:5]]
-        orientation = best[5]
+        ellip = list(result[-ii])
+        yc, xc, a, b = [int(round(x)) for x in ellip[1:5]]
+        orientation = ellip[5]
 
         # Draw the ellipse on the original image
         cy, cx = ellipse_perimeter(yc, xc, a, b, orientation)
         # Draw the edge (white) and the resulting ellipse (red)
-        edges = color.gray2rgb(img_as_ubyte(edges))
-        edges[cy, cx] = (250, 0, 0)
+        Itemp = color.gray2rgb(I_sub)
+        Itemp[cy, cx] = (250, 0, 0)
+        plt.imshow(Itemp)
+        plt.pause(1)
+
 
 def expand_bbox(box,expansion=0.4):
     """
@@ -227,11 +233,18 @@ def expand_bbox(box,expansion=0.4):
 def find_all_in_slice(I,fol_dict,slice_num):
 
 
-    for fol in fol_dict.iteritems():
+    Ifull_temp = color.gray2rgb(I)
+    for id,fol in fol_dict.iteritems():
 
         rr,cc = expand_bbox(fol.bbox[slice_num])
         I_sub = I[rr,cc]
-        inner,outer,bbox=extract_mask(I_sub)
+        try:
+            inner,outer,bbox=extract_mask(I_sub)
+        except:
+            print('Failed on Follicle; Skipping. Try hough transform?')
+            continue
+            # hough_ellipse_finder(I_sub)
+
         bbox = draw.rectangle(bbox[:2],bbox[2:])
         I_temp = color.gray2rgb(I_sub)
         bbox = expand_bbox(bbox)
@@ -249,18 +262,14 @@ def find_all_in_slice(I,fol_dict,slice_num):
         outer_ypts+=np.min(rr)
         outer_pts = (outer_ypts,outer_xpts)
 
+        Ifull_temp[inner_pts] = (0,250,0)
+        Ifull_temp[outer_pts] = (250,0,0)
+
         fol.add_inner(slice_num,inner_pts)
         fol.add_outer(slice_num,inner_pts)
         fol.add_bbox(slice_num,bbox)
-
-
-
-
-
-
-
-
-
+    plt.imshow(Ifull_temp)
+    plt.pause(15)
 
 
 
@@ -280,10 +289,9 @@ if __name__=='__main__':
     filename = r'L:\Users\guru\Documents\hartmann_lab\data\Pad2_2018\Pad2_2018\registered\regPad2_2018_0131.tif'
     I = io.imread(filename)
     major_box = ui_major_bounding_box(I)
-    fol_dict = user_get_fol_bounds(I,major_box)
-    rr = fol_dict[1][0]
-    cc = fol_dict[1][1]
-    I_sub = I[rr,cc]
+    fol_dict = user_get_fol_bounds(I,major_box,1)
+    find_all_in_slice(I,fol_dict,1)
+
 
 
 
