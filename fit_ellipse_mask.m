@@ -1,6 +1,9 @@
-function [ellipse_t,rotated_ellipse,re_small, re_big] = fit_ellipse_mask( x,y )
- smallval = 0.9;  bigval = 1.1;
-    
+function [ellipse_t,rotated_ellipse,re_small, re_big] = fit_ellipse_mask(x,y, smallval, bigval)
+
+if nargin == 2
+    smallval = 0.9;  bigval = 1.1;
+end;
+
 % fit_ellipse - finds the best fit to an ellipse for the given set of points.
 %
 % Format:   ellipse_t = fit_ellipse( x,y,axis_handle )
@@ -158,7 +161,7 @@ a = sum(X)/(X'*X);
 % check for warnings
 if ~isempty( lastwarn )
     disp( 'stopped because of a warning regarding matrix inversion' );
-    ellipse_t = [];
+    ellipse_t = [];rotated_ellipse= [];re_small= []; re_big = [];
     return
 end
 
@@ -167,7 +170,7 @@ end
 
 % remove the orientation from the ellipse
 if ( min(abs(b/a),abs(b/c)) > orientation_tolerance )
-
+    
     orientation_rad = 1/2 * atan( b/(c-a) );
     cos_phi = cos( orientation_rad );
     sin_phi = sin( orientation_rad );
@@ -191,15 +194,17 @@ test = a*c;
 switch (1)
     case (test>0),  status = '';
     case (test==0), status = 'Parabola found';  warning( 'fit_ellipse: Did not locate an ellipse' );
+        ellipse_t= [];rotated_ellipse= [];re_small= []; re_big = [];
     case (test<0),  status = 'Hyperbola found'; warning( 'fit_ellipse: Did not locate an ellipse' );
+        ellipse_t= [];rotated_ellipse= [];re_small= []; re_big = [];
 end
 
 % if we found an ellipse return its data
 if (test>0)
-
+    
     % make sure coefficients are positive as required
     if (a<0), [a,c,d,e] = deal( -a,-c,-d,-e ); end
-
+    
     % final ellipse parameters
     X0          = mean_x - d/2/a;
     Y0          = mean_y - e/2/c;
@@ -207,13 +212,13 @@ if (test>0)
     [a,b]       = deal( sqrt( F/a ),sqrt( F/c ) );
     long_axis   = 2*max(a,b);
     short_axis  = 2*min(a,b);
-
+    
     % rotate the axes backwards to find the center point of the original TILTED ellipse
     R           = [ cos_phi sin_phi; -sin_phi cos_phi ];
     P_in        = R * [X0;Y0];
     X0_in       = P_in(1);
     Y0_in       = P_in(2);
-
+    
     % pack ellipse into a structure
     ellipse_t = struct( ...
         'a',a,...
@@ -247,11 +252,11 @@ if isempty(lala)
     rotated_ellipse =[];
 end;
 if ~isempty(lala);
-
+    
     % rotation matrix to rotate the axes with respect to an angle phi
     R = [ cos_phi sin_phi; -sin_phi cos_phi ];
-
-
+    
+    
     % the ellipse
     theta_r         = linspace(0,2*pi);
     ellipse_x_r     = X0 + a*cos( theta_r );
@@ -263,24 +268,24 @@ if ~isempty(lala);
     ellipse_y_r_b    = Y0 + (b*bigval)*sin( theta_r );
     re_small = R * [ellipse_x_r_s;ellipse_y_r_s];
     re_big = R * [ellipse_x_r_b;ellipse_y_r_b];
-
+    
     % check if we need to plot an ellipse with its axes.
-% % % % %     if (nargin>2) & ~isempty( axis_handle ) & (test>0)
-% % % % % 
-% % % % %         % the axes
-% % % % %         ver_line        = [ [X0 X0]; Y0+b*[-1 1] ];
-% % % % %         horz_line       = [ X0+a*[-1 1]; [Y0 Y0] ];
-% % % % %         new_ver_line    = R*ver_line;
-% % % % %         new_horz_line   = R*horz_line;
-% % % % % 
-% % % % %         % draw
-% % % % %         hold_state = get( axis_handle,'NextPlot' );
-% % % % %         set( axis_handle,'NextPlot','add' );
-% % % % %         plot( new_ver_line(1,:),new_ver_line(2,:),'g' );
-% % % % %         plot( new_horz_line(1,:),new_horz_line(2,:),'b' );
-% % % % %         plot( rotated_ellipse(1,:),rotated_ellipse(2,:),'r*' );
-% % % % %         set( axis_handle,'NextPlot',hold_state );
-% % % % %     end
+    % % % % %     if (nargin>2) & ~isempty( axis_handle ) & (test>0)
+    % % % % %
+    % % % % %         % the axes
+    % % % % %         ver_line        = [ [X0 X0]; Y0+b*[-1 1] ];
+    % % % % %         horz_line       = [ X0+a*[-1 1]; [Y0 Y0] ];
+    % % % % %         new_ver_line    = R*ver_line;
+    % % % % %         new_horz_line   = R*horz_line;
+    % % % % %
+    % % % % %         % draw
+    % % % % %         hold_state = get( axis_handle,'NextPlot' );
+    % % % % %         set( axis_handle,'NextPlot','add' );
+    % % % % %         plot( new_ver_line(1,:),new_ver_line(2,:),'g' );
+    % % % % %         plot( new_horz_line(1,:),new_horz_line(2,:),'b' );
+    % % % % %         plot( rotated_ellipse(1,:),rotated_ellipse(2,:),'r*' );
+    % % % % %         set( axis_handle,'NextPlot',hold_state );
+    % % % % %     end
 end;
 
 
