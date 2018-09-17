@@ -9,6 +9,11 @@ from skimage.measure import regionprops
 
 
 class Follicle():
+    """
+    An object which contains the points and metadata for a given follicle. Keeps inner, outer
+    and bounding box information in dictionaries where the key
+    is the slice number.
+    """
     def __init__(self,ID):
         self.ID = ID
         self.whisker=''
@@ -17,6 +22,12 @@ class Follicle():
         self.bbox = defaultdict()
 
     def add_inner(self,slice_num,inner_pts):
+        """
+        Add slice, points pair to the inner follicle dictionary
+        :param slice_num: The identifying number for the slice
+        :param inner_pts: The pixels defining the inner follicle
+        :return: None
+        """
         if slice_num in self.inner.keys():
             print('Overwriting previous tracking on slice {}'.format(slice_num))
         else:
@@ -24,6 +35,12 @@ class Follicle():
 
 
     def add_outer(self,slice_num,outer_pts):
+        """
+        Add slice, points pair to the outer follicle dictionary
+        :param slice_num: The identifying number for the slice
+        :param outer_pts: The pixels defining the outer follicle
+        :return: None
+        """
         if slice_num in self.outer.keys():
             print('Overwriting previous tracking on slice {}'.format(slice_num))
         else:
@@ -31,6 +48,12 @@ class Follicle():
 
 
     def add_bbox(self,slice_num,box):
+        """
+        Add slice, bounding box pair to the bounding box follicle dictionary
+        :param slice_num: The identifying number for the slice
+        :param box: The pixels defining the extent of the follicle in terms of a bounding box.
+        :return: None
+        """
         if slice_num in self.bbox.keys():
             print('Overwriting previous tracking on slice {}'.format(slice_num))
         else:
@@ -38,6 +61,14 @@ class Follicle():
 
 
 def ginput2boundingbox(a,b,mode='mask'):
+    """
+    Takes the two corner points from the ginput of a rectangle
+    and returns that rectangle in different forms
+    :param a: (x_1,y_1)the first point
+    :param b:(x_2,y_2) the second point
+    :param mode: 'mask','verts',or 'patch' to define the output style
+    :return: (rr,cc) if 'mask' or 'verts', (coord,h,w) if 'patch'
+    """
     pts = np.array([[a[0],a[1]],[b[0],b[1]],[a[0],b[1]],[b[0],a[1]]],dtype='int')
     bot_x = np.min(pts[:,0])
     bot_y = np.min(pts[:,1])
@@ -60,6 +91,13 @@ def ginput2boundingbox(a,b,mode='mask'):
     return(rr,cc)
 
 def ui_major_bounding_box(I):
+    """
+    Asks the user to define a major bounding box around the part of the pad
+    that contains all the follicles.
+    #TODO: Allow the user to refine the bounding box
+    :param I: The image of the slice
+    :return: (rr,cc) the rows and columns which define the kept parts of the image
+    """
     while True:
         fig,ax = plt.subplots(1,2)
         plt.sca(ax[0])
@@ -75,7 +113,17 @@ def ui_major_bounding_box(I):
 
     plt.close('all')
     return(rr,cc)
+
+
 def zoom_to_box(ax,box):
+    """
+    Given a bounding box in 'mask' form, zooms the passed axis to those points.
+    Allows for viewing of the ROI without modifying the image
+    :param ax: Axes which contain the image to be zoomed
+    :param box: The bounding box in 'mask' form
+    :return: None
+    """
+    # TODO: Allow box to be passed as a variety of input types
     ax.set_xlim(np.min(box[1]),np.max(box[1]))
     ax.set_ylim(np.min(box[0]),np.max(box[0]))
     ax.invert_yaxis()
@@ -143,6 +191,12 @@ def extract_all_ellipses(I,rr,cc):
     cy,cx = ellipse_perimeter(yc,xc,a,b,orientation)
 
 def plot_bbox_from_region(region,ax=None):
+    """
+    If given a 'regionprops' region, plot a bounding box around that for feedback
+    :param region: A regionprops region
+    :param ax: the axes to plot the rectangle on
+    :return: None
+    """
     if ax is None:
         ax = plt.gca()
     bbox = region.bbox
@@ -156,20 +210,33 @@ def plot_bbox_from_region(region,ax=None):
 def extract_mask(I_sub):
     """
     Find ellipses in the follicle ROI
-    :param I_sub: Sub image of just the follicel ROI
-    :return:
+    :param I_sub: Sub image of just the follicle ROI
+    :return: inner, outer, bbox points of the inner and outer extents of the follicle
     """
+    # Get the thresholded image to extract the follicle from
     I_sub = exposure.equalize_hist(I_sub)
     T = filters.threshold_yen(I_sub)
-
     bw = I_sub<T
     bw = closing(bw,disk(5))
+
+    # extract the desired region
     region_labels = label(bw)
     props = regionprops(region_labels)
     largest_idx = np.argsort([r.area for r in props])[-1]
+
+    # Remove the non desired regions from the label set
     mask = region_labels==np.array(largest_idx+1,dtype='int64')
-    largest_region = props[largest_idx]
     region_labels[np.logical_not(mask)]=0
+
+    inner,outer,bbox = extract_boundaries(region_labels)
+    return(inner,outer,bbox)
+
+def extract_boundaries(region_labels):
+    """
+    Get the inner and outer boundaries
+    :param region_labels: A labelled image of just the follicle
+    :return: inner,outer,bbox: pixels of the image that represent the boundaries of the follicle
+    """
     boundary = segmentation.find_boundaries(region_labels,mode='inner')
     boundaries = label(boundary)
     bound_props = regionprops(boundaries)
@@ -183,26 +250,30 @@ def extract_mask(I_sub):
         outer = boundaries==boundary_order[1]
         inner = boundaries==boundary_order[0]
         bbox = bound_props[boundary_order[1]].bbox
+
     return(inner,outer,bbox)
 
 
 def hough_ellipse_finder(I_sub):
     """
-    Probably wont need
-    :return:
+    Uses the ellipse hough transform to find ellipses. Use if the bw theshold method fails.
+    :param I_sub: The ROI image from which to extract the ellipses
+    :return: innner,outer ellipse points.
     """
     edges = feature.canny(I_sub,sigma=2.0)
     result = transform.hough_ellipse(edges, accuracy=20, threshold=250,
                            min_size=100)
     result.sort(order='accumulator')
 
-    for ii in range(1,3):
+    for ii in range(len(result)):
         ellip = list(result[-ii])
         yc, xc, a, b = [int(round(x)) for x in ellip[1:5]]
         orientation = ellip[5]
 
         # Draw the ellipse on the original image
         cy, cx = ellipse_perimeter(yc, xc, a, b, orientation)
+        cy = cy[cy<I_sub.shape[0]]
+        cx = cx[cx<I_sub.shape[1]]
         # Draw the edge (white) and the resulting ellipse (red)
         Itemp = color.gray2rgb(I_sub)
         Itemp[cy, cx] = (250, 0, 0)
@@ -210,11 +281,11 @@ def hough_ellipse_finder(I_sub):
         plt.pause(1)
 
 
-def expand_bbox(box,expansion=0.4):
+def expand_bbox(box,expansion=0.5):
     """
     accepts a solid rectangle ROI and expands it
-    :param box:
-    :param expansion:
+    :param box: A bounding box in "mask" form.
+    :param expansion: the percentage to expand each dimension by [0,1]. Default: 0.5
     :return:
     """
     x_bds = np.array([np.min(box[1]),np.max(box[1])])
@@ -228,14 +299,21 @@ def expand_bbox(box,expansion=0.4):
     return(draw.rectangle((y_bds[0], x_bds[0]), (y_bds[1], x_bds[1])))
 
 
-
-
 def find_all_in_slice(I,fol_dict,slice_num):
-
-
+    """
+    Loop through all the follicle objects in fol dict and try to find
+    the follicle in the image I.
+    :param I: The image of the slice (grayscale)
+    :param fol_dict: a dictionary of follicle objects. Uses the bounding box
+                    for each follicle object to create the ROI on which to extract the follicle,
+                    then adds information about the follicle
+    :param slice_num: The slice identifying number. Used in the follicle object.
+    :return: None
+    """
     Ifull_temp = color.gray2rgb(I)
-    for id,fol in fol_dict.iteritems():
 
+    for id,fol in fol_dict.iteritems():
+        # Get an ROI and find the follicle
         rr,cc = expand_bbox(fol.bbox[slice_num])
         I_sub = I[rr,cc]
         try:
@@ -245,7 +323,9 @@ def find_all_in_slice(I,fol_dict,slice_num):
             continue
             # hough_ellipse_finder(I_sub)
 
+        # convert the bounding box from a list of 4 to a mask
         bbox = draw.rectangle(bbox[:2],bbox[2:])
+        # Show the user the found follicle bounds
         I_temp = color.gray2rgb(I_sub)
         bbox = expand_bbox(bbox)
         I_temp[inner] = (250,0,0)
@@ -253,6 +333,8 @@ def find_all_in_slice(I,fol_dict,slice_num):
         plt.imshow(I_temp)
         plt.title('Follicle {}'.format(id))
         plt.pause(0.2)
+
+        # Map the ROI points back to the full image
         inner_xpts,inner_ypts = np.where(inner)
         inner_xpts+=np.min(cc)
         inner_ypts+=np.min(rr)
@@ -262,15 +344,18 @@ def find_all_in_slice(I,fol_dict,slice_num):
         outer_ypts+=np.min(rr)
         outer_pts = (outer_ypts,outer_xpts)
 
+        # Plot the found follicle
         Ifull_temp[inner_pts] = (0,250,0)
         Ifull_temp[outer_pts] = (250,0,0)
 
+        # add the data to the follicle object
         fol.add_inner(slice_num,inner_pts)
         fol.add_outer(slice_num,inner_pts)
         fol.add_bbox(slice_num,bbox)
-    plt.imshow(Ifull_temp)
-    plt.pause(15)
 
+    # Show the user the tracked pad
+    plt.imshow(Ifull_temp)
+    plt.pause()
 
 
 
