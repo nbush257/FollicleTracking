@@ -206,19 +206,8 @@ def plot_bbox_from_region(region,ax=None):
     rect = patches.Rectangle(coord, w, h, linewidth=5, edgecolor='r', facecolor='none')
     ax.add_patch(rect)
 
-def check_convex_metric(region):
-    """
-    Returns a cost metric which tells us how convex the region is
-    by subtracting the convex perimeter from the raw region perimeter.
-    :param region: a regionprops object
-    :return: cost: the difference between the convex hull perimeter and the raw region perimeter
-    """
-    (float(np.sum(region.convex_image)/region.filled_area)
 
-
-
-
-def extract_mask(I_sub,size_thresh = 300):
+def extract_mask(I_sub,thresh_size=1000):
     """
     Find ellipses in the follicle ROI
     :param I_sub: Sub image of just the follicle ROI
