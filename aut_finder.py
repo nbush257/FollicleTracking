@@ -1,4 +1,5 @@
-from skimage import transform,draw,feature,io,filters,segmentation,color,exposure
+
+from skimage import transform,draw,feature,io,filters,segmentation,color,exposure,morphology
 from skimage.draw import ellipse_perimeter
 from matplotlib import patches
 from collections import defaultdict
@@ -76,7 +77,7 @@ def ginput2boundingbox(a,b,mode='mask'):
     top_y = np.max(pts[:,1])
 
     if mode=='mask':
-        rr,cc = draw.rectangle((bot_y,bot_x),end=(top_y,top_x))
+        rr,cc = draw.rectangle((bot_x,bot_y),end=(top_x,top_y))
     elif mode=='verts':
         rr = np.array([bot_x,bot_x,top_x,top_x])
         cc = np.array([bot_y,top_y,top_y,bot_y])
@@ -89,6 +90,7 @@ def ginput2boundingbox(a,b,mode='mask'):
         raise ValueError("Unknown mode of output requested. Must be 'mask' or 'verts'")
 
     return(rr,cc)
+
 
 def ui_major_bounding_box(I):
     """
@@ -165,7 +167,6 @@ def user_get_fol_bounds(I,major_box,slice_num,fol_dict=None):
     return(fol_dict)
 
 
-
 def extract_all_ellipses(I,rr,cc):
     """
     this code is intended to extract ellipses on a very large image. Probably not a good idea'
@@ -189,6 +190,7 @@ def extract_all_ellipses(I,rr,cc):
     orientation=best[5]
 
     cy,cx = ellipse_perimeter(yc,xc,a,b,orientation)
+
 
 def plot_bbox_from_region(region,ax=None):
     """
@@ -249,6 +251,7 @@ def extract_mask(I_sub,thresh_size=1000):
     inner,outer,bbox = extract_boundaries(region_labels)
     return(inner,outer,bbox)
 
+
 def extract_boundaries(region_labels):
     """
     Get the inner and outer boundaries
@@ -270,6 +273,17 @@ def extract_boundaries(region_labels):
         bbox = bound_props[boundary_order[1]].bbox
 
     return(inner,outer,bbox)
+
+
+def get_ellipse_fit_cost(region):
+    pts = np.where(region.image)
+    pts = np.array([pts[1],pts[0]]).T
+    e = EllipseModel()
+    e.estimate(pts)
+
+    cost = np.mean(e.residuals(pts)**2)
+    return(cost)
+
 
 
 def hough_ellipse_finder(I_sub):
@@ -297,6 +311,48 @@ def hough_ellipse_finder(I_sub):
         Itemp[cy, cx] = (250, 0, 0)
         plt.imshow(Itemp)
         plt.pause(1)
+
+def find_all_bounding_boxes(I,size_thresh=500,cost_thresh=100):
+
+    g = filters.frangi(I)
+    T = filters.threshold_li(g)
+    bw = g>T
+    bw = closing(bw,disk(5))
+    skel = morphology.skeletonize(bw)
+    region_labels= label(skel)
+    props = regionprops(region_labels)
+    for ii in range(np.max(region_labels)):
+        region = props[ii]
+        if props[ii].convex_area<size_thresh:
+            skel[region_labels==(ii+1)] =0
+    region_labels= label(skel)
+    props = regionprops(region_labels)
+    cost = np.array([get_ellipse_fit_cost(r) for r in props])
+
+    for ii in range(np.max(region_labels)):
+        region = props[ii]
+        if cost[ii]>cost_thresh:
+            skel[region_labels==(ii+1)] =0
+
+    region_labels = label(skel)
+    props = regionprops(region_labels)
+    bounding_box_dict = defaultdict()
+    for ii,region in enumerate(props):
+        box = region.bbox +np.array(np.min(region.coords[:,0]),np.min(region.coords[:,1]))
+        bounding_box_dict[ii]=box
+
+        #Plot
+        coord = box[:2]
+        w = box[3]-box[1]
+        h = box[2]-box[0]
+        rect = patches.Rectangle(coord,w,h,linewidth=2,edgecolor='r',facecolor='none')
+        ax.add_patch(rect)
+
+
+
+    return(bounding_box_dict)
+
+
 
 
 def expand_bbox(box,expansion=0.5):
@@ -374,7 +430,6 @@ def find_all_in_slice(I,fol_dict,slice_num):
     # Show the user the tracked pad
     plt.imshow(Ifull_temp)
     plt.pause()
-
 
 
 def propgate_ROI(I0,I1,fol_dict):
