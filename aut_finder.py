@@ -206,26 +206,55 @@ def plot_bbox_from_region(region,ax=None):
     rect = patches.Rectangle(coord, w, h, linewidth=5, edgecolor='r', facecolor='none')
     ax.add_patch(rect)
 
+def check_convex_metric(region):
+    """
+    Returns a cost metric which tells us how convex the region is
+    by subtracting the convex perimeter from the raw region perimeter.
+    :param region: a regionprops object
+    :return: cost: the difference between the convex hull perimeter and the raw region perimeter
+    """
+    (float(np.sum(region.convex_image)/region.filled_area)
 
-def extract_mask(I_sub):
+
+
+
+def extract_mask(I_sub,size_thresh = 300):
     """
     Find ellipses in the follicle ROI
     :param I_sub: Sub image of just the follicle ROI
+    :param size_thresh: number of pixels the follicle needs to be in order to count as a follicle candidate
     :return: inner, outer, bbox points of the inner and outer extents of the follicle
     """
     # Get the thresholded image to extract the follicle from
+    I_sub = filters.median(I_sub)
     I_sub = exposure.equalize_hist(I_sub)
-    T = filters.threshold_yen(I_sub)
-    bw = I_sub<T
-    bw = closing(bw,disk(5))
+    g = filters.frangi(I_sub)
+    thresh_size = min(I_sub.shape)/2
+    if thresh_size %2 ==0:
+        thresh_size+=1
+    T = filters.threshold_local(g,thresh_size)
+
+    bw = g>T
+    bw = closing(bw,disk(3))
 
     # extract the desired region
     region_labels = label(bw)
     props = regionprops(region_labels)
-    largest_idx = np.argsort([r.area for r in props])[-1]
+    # remove small regions
+    idx = np.argsort([r.filled_area for r in props])[-10:]
+    for ii in range(np.max(region_labels)):
+        if ii not in idx:
+            bw[region_labels==ii+1]=0
+    region_labels = label(bw)
+    props = regionprops(region_labels)
 
-    # Remove the non desired regions from the label set
-    mask = region_labels==np.array(largest_idx+1,dtype='int64')
+    check_convex_metric = lambda(region): float(np.sum(region.convex_image))/region.filled_area
+
+    convex_idx = np.argsort([check_convex_metric(r) for r in props])
+    candidate = convex_idx[0]
+
+    # Remove the non propdesired regions from the label set
+    mask = region_labels==np.array(candidate+1,dtype='int64')
     region_labels[np.logical_not(mask)]=0
 
     inner,outer,bbox = extract_boundaries(region_labels)
