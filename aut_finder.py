@@ -1,4 +1,6 @@
 from scipy.spatial import distance
+import re
+import glob
 from skimage import transform,draw,feature,io,filters,segmentation,color,exposure,morphology,measure
 from skimage.draw import ellipse_perimeter
 from matplotlib import patches
@@ -18,8 +20,9 @@ class Follicle():
     and bounding box information in dictionaries where the key
     is the slice number.
     """
-    def __init__(self,ID):
+    def __init__(self,ID,pad_name):
         self.ID = ID
+        self.pad_name = pad_name
         self.whisker=''
         self.inner = defaultdict()
         self.outer = defaultdict()
@@ -193,8 +196,11 @@ def angle_cost(region_labels):
     :return:
     """
     center = np.array(region_labels.shape)/2
-    skel = morphology.skeletonize(region_labels>0)
-    skel_labels = label(skel)
+    skel_labels = np.zeros_like(region_labels)
+    for ii in range(1,np.max(region_labels)+1):
+        bw = morphology.skeletonize(region_labels==ii)
+        skel_labels[bw] = ii
+
     skel_props = regionprops(skel_labels)
     region_angle_extent = []
     for region in skel_props:
@@ -274,14 +280,21 @@ def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.05,area_thresh=1000,angle
     idx = np.where(np.logical_and(area_ratio>ratio_thresh,area>area_thresh))[0]
     contains_centroid = [r.image[int(r.local_centroid[0]),int(r.local_centroid[1])] for r in props]
     angle_extent = angle_cost(region_labels)
+
     for ii in range(np.max(region_labels)):
         if contains_centroid[ii]:# remove regions that are filled at the centroid
             bw[region_labels==ii+1]=0
         if ii not in idx: # remove regions that dont meet the threshold criterion.
             bw[region_labels==ii+1]=0
         if angle_extent[ii]<angle_extent_thresh:
-            bw[region_labels==ii]=0
+            bw[region_labels==ii+1]=0
 
+    if np.all(bw==False):
+        print('No valid roi found')
+        biggest_idx = np.argsort(area)[-1]
+        bbox = props[biggest_idx].bbox
+        centroid = props[biggest_idx].centroid
+        return([],[],bbox,centroid)
 
     region_labels = label(bw)
     props = regionprops(region_labels)
@@ -428,12 +441,12 @@ def find_all_bounding_boxes(I,min_size=500,max_size=1e6,cost_thresh=100):
     return(bounding_box_dict)
 
 
-def bbox_to_fol_dict(bbox_dict,slice_num):
+def bbox_to_fol_dict(bbox_dict,slice_num,pad_name):
     fol_dict = defaultdict()
     count=0
     for box in bbox_dict.itervalues():
         count+=1
-        F = Follicle(count)
+        F = Follicle(count,pad_name)
         F.add_bbox(slice_num=slice_num,box=box)
         fol_dict[count] = F
 
@@ -550,6 +563,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
     Ifull_temp = color.gray2rgb(I)
 
     for id,fol in fol_dict.iteritems():
+        print('\tWorking on Follicle {} of {}'.format(id,len(fol_dict)))
         # Get an ROI and find the follicle
         plt.close('all')
         rr,cc = expand_bbox(fol.bbox[slice_num],0.5)
@@ -586,29 +600,38 @@ def find_all_in_slice(I,fol_dict,slice_num):
             plt.pause(0.1)
 
         # Map the ROI points back to the full image
-        inner_row,inner_col = np.where(inner)
-        inner_row+=np.min(rr)
-        inner_col+=np.min(cc)
-        inner_pts = (inner_row,inner_col)
+        if len(inner)>0:
+            inner_row,inner_col = np.where(inner)
+            inner_row+=np.min(rr)
+            inner_col+=np.min(cc)
+            inner_pts = (inner_row,inner_col)
 
-        outer_row,outer_col = np.where(outer)
-        outer_row+=np.min(rr)
-        outer_col+=np.min(cc)
-        outer_pts = (outer_row,outer_col)
+            outer_row,outer_col = np.where(outer)
+            outer_row+=np.min(rr)
+            outer_col+=np.min(cc)
+            outer_pts = (outer_row,outer_col)
+
+            fix_bounds(inner_pts,Ifull_temp)
+            fix_bounds(outer_pts,Ifull_temp)
+            mask_inner = mask_final_points(I,inner_pts)
+            mask_outer = mask_final_points(I,outer_pts)
+
+            # Plot the found follicle in full image
+            Ifull_temp[mask_inner] = (0,250,0)
+            Ifull_temp[mask_outer] = (250,0,0)
+        else:
+            inner_pts = []
+            outer_pts = []
 
         centroid += np.array([np.min(rr),np.min(cc)])
-        fix_bounds(inner_pts,Ifull_temp)
-        fix_bounds(outer_pts,Ifull_temp)
-        mask_inner = mask_final_points(I,inner_pts)
-        mask_outer = mask_final_points(I,outer_pts)
+        # map bbox back to image
+        bbox[0] +=np.min(rr)
+        bbox[1] +=np.min(cc)
 
-        # Plot the found follicle in full image
-        Ifull_temp[mask_inner] = (0,250,0)
-        Ifull_temp[mask_outer] = (250,0,0)
 
         # add the data to the follicle object
         fol.add_inner(slice_num,inner_pts)
-        fol.add_outer(slice_num,inner_pts)
+        fol.add_outer(slice_num,outer_pts)
         fol.add_bbox(slice_num,bbox)
         fol.add_centroid(slice_num,centroid)# in row,col notation
 
@@ -629,32 +652,45 @@ def propgate_ROI(I0,I1,fol_dict):
     pass
 
 
+def batch_ims(p_load,p_save):
+    init = True
+    pad_name = re.search('Pad\d',filename).group()
+    save_fname = os.path.join(p_save,'{}_follicles.pckl'.format(pad_name))
+    for filename in glob.glob(os.path.join(p_load,'*.tif')):
+        slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
+        print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
+        bbox_fname = os.path.join(p_save,'bbox_{:04}.pckl'.format(slice_num))
+        I = io.imread(filename)
+        if os.path.isfile(bbox_fname):
+            with open(bbox_fname,'r') as bbox_file:
+                bbox_dict = pickle.load(bbox_file)
+        else:
+            bbox_dict = find_all_bounding_boxes(I,min_size=4000,cost_thresh=250)
+            with open(bbox_fname,'w') as bbox_file:
+                pickle.dump(bbox_dict,bbox_file)
+
+        if init:
+            fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name)
+            init = False
+        find_all_in_slice(I,fol_dict,slice_num)
+        # save to a pickle file
+        with open(save_fname) as fid:
+            pickle.dump(fol_dict)
+
+
+
 
 
 
 if __name__=='__main__':
-    plot_tgl = True
-    filename = r'C:\Users\nbush257\Desktop\regPad2_2018_0131.tif'
-    filename = r'L:\Users\guru\Documents\hartmann_lab\data\Pad2_2018\Pad2_2018\registered\regPad2_2018_0131.tif'
-    slice_num = int(filename[-8:-4])
-    bbox_fname = r'C:\Users\guru\Desktop\bbox_{:04}.pckl'.format(slice_num)
-    # bbox_fname = r'C:\Users\nbush257\Desktop\bbox_{:04}.pckl'.format(slice_num)
-    I = io.imread(filename)
-    # major_box = ui_major_bounding_box(I)
-    # fol_dict = user_get_fol_bounds(I,major_box,1)
-
-    # only have to get the bbox_dict once
-    if os.path.isfile(bbox_fname):
-        with open(bbox_fname,'r') as bbox_file:
-            bbox_dict = pickle.load(bbox_file)
+    p_load = sys.argv[1]
+    if len(sys.argv)>2:
+        p_save = sys.argv[2]
     else:
-        bbox_dict = find_all_bounding_boxes(I,min_size=4000,cost_thresh=250)
-        with open(bbox_fname,'w') as bbox_file:
-            pickle.dump(bbox_dict,bbox_file)
+        p_save = p_load
+    batch_ims(p_load,p_save)
 
 
-    fol_dict = bbox_to_fol_dict(bbox_dict,slice_num)
-    find_all_in_slice(I,fol_dict,slice_num)
 
 
 
