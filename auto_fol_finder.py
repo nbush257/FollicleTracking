@@ -441,14 +441,20 @@ def find_all_bounding_boxes(I,min_size=500,max_size=1e6,cost_thresh=100):
     return(bounding_box_dict)
 
 
-def bbox_to_fol_dict(bbox_dict,slice_num,pad_name):
-    fol_dict = defaultdict()
+def bbox_to_fol_dict(bbox_dict,slice_num,pad_name,fol_dict=None):
     count=0
-    for box in bbox_dict.itervalues():
-        count+=1
-        F = Follicle(count,pad_name)
-        F.add_bbox(slice_num=slice_num,box=box)
-        fol_dict[count] = F
+    if fol_dict is None:
+        fol_dict = defaultdict()
+        for box in bbox_dict.itervalues():
+            count+=1
+            F = Follicle(count,pad_name)
+            F.add_bbox(slice_num=slice_num,box=box)
+            fol_dict[count] = F
+    else:
+        for box in bbox_dict.itervalues():
+            count+=1
+            fol_dict[count].add_bbox(slice_num=slice_num,box=box)
+
 
     return(fol_dict)
 
@@ -659,9 +665,18 @@ def batch_ims(p_load,p_save):
     filename = file_list[0]
     pad_name = re.search('Pad\d',filename).group()
     save_fname = os.path.join(p_save,'{}_follicles.pckl'.format(pad_name))
+    if os.path.isfile(save_fname):
+        with open(save_fname,'r') as fid:
+            fol_dict = pickle.load(fid)
+        init=False
+
+
     for filename in file_list:
-        slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
         print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
+        slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
+        if slice_num in fol_dict[1].inner.keys():
+            print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
+            continue
         bbox_fname = os.path.join(p_save,'bbox_{}.pckl'.format(slice_num))
         I = io.imread(filename)
         if os.path.isfile(bbox_fname):
@@ -675,10 +690,12 @@ def batch_ims(p_load,p_save):
         if init:
             fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name)
             init = False
+        else:
+            fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name,fol_dict)
         find_all_in_slice(I,fol_dict,slice_num)
         # save to a pickle file
-        with open(save_fname) as fid:
-            pickle.dump(fol_dict)
+        with open(save_fname,'w') as fid:
+            pickle.dump(fol_dict,fid)
 
 
 
@@ -686,6 +703,7 @@ def batch_ims(p_load,p_save):
 
 
 if __name__=='__main__':
+    plot_tgl = False
     p_load = sys.argv[1]
     if len(sys.argv)>2:
         p_save = sys.argv[2]
