@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skimage.morphology import closing,square,disk,label
 from skimage.measure import regionprops,EllipseModel
+import cPickle as pickle
+import os
+import sys
 
 
 class Follicle():
@@ -21,6 +24,7 @@ class Follicle():
         self.inner = defaultdict()
         self.outer = defaultdict()
         self.bbox = defaultdict()
+        self.centroid = defaultdict()
 
     def add_inner(self,slice_num,inner_pts):
         """
@@ -55,8 +59,10 @@ class Follicle():
         :param box: The pixels defining the extent of the follicle in terms of a bounding box.
         :return: None
         """
-            self.bbox[slice_num] = box
+        self.bbox[slice_num] = box
 
+    def add_centroid(self, slice_num,centroid):
+        self.centroid[slice_num] = centroid
 
 def ginput2boundingbox(a,b,mode='mask'):
     """
@@ -164,31 +170,6 @@ def user_get_fol_bounds(I,major_box,slice_num,fol_dict=None):
     return(fol_dict)
 
 
-def extract_all_ellipses(I,rr,cc):
-    """
-    this code is intended to extract ellipses on a very large image. Probably not a good idea'
-    :param I:
-    :param rr:
-    :param cc:
-    :return:
-    """
-    # I_filt = filters.median(I,np.ones([9,9]))
-    pass
-    edges = feature.canny(I[rr,cc],sigma=3.0)
-
-    result = transform.hough_ellipse(edges,
-                                     accuracy=20,
-                                     threshold=250,
-                                     min_size=100,
-                                     max_size=120)
-    result.sort(order='accumulator')
-    best = list(result[-1])
-    yc,xc,a,b = [int(round(x)) for x in best[1:5]]
-    orientation=best[5]
-
-    cy,cx = ellipse_perimeter(yc,xc,a,b,orientation)
-
-
 def plot_bbox_from_region(region,ax=None):
     """
     If given a 'regionprops' region, plot a bounding box around that for feedback
@@ -240,7 +221,7 @@ def centroid_distance_cost(region):
     return(np.var(D))
 
 
-def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.01,area_thresh=1000):
+def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.05,area_thresh=1000):
     """
     Find ellipses in the follicle ROI
     :param I_sub: Sub image of just the follicle ROI
@@ -248,8 +229,6 @@ def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.01,area_thresh=1000):
     :return: inner, outer, bbox points of the inner and outer extents of the follicle
     """
     # Get the thresholded image to extract the follicle from
-    plt.close('all')
-    fig,ax = plt.subplots(2,2)
     # I_sub = filters.median(I_sub)
     I_sub = exposure.equalize_hist(I_sub)
     g = filters.frangi(I_sub)
@@ -257,12 +236,13 @@ def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.01,area_thresh=1000):
     if thresh_size %2 ==0:
         thresh_size+=1
     T = filters.threshold_local(g,thresh_size)
-    T = filters.threshold_li(g)
+    # T = filters.threshold_li(g)
     bw = g>T
-    ax[0,0].imshow(g)
-    ax[0,0].set_title('Frangi Filter')
-    ax[0,1].imshow(bw)
-    ax[0,1].set_title('All regions')
+    # fig,ax = plt.subplots(2,2)
+    # ax[0,0].imshow(g)
+    # ax[0,0].set_title('Frangi Filter')
+    # ax[0,1].imshow(bw)
+    # ax[0,1].set_title('All regions')
 
     # extract the desired region
     region_labels = label(bw)
@@ -283,19 +263,21 @@ def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.01,area_thresh=1000):
     candidate = ROI_cost(props,I_sub)
     # Chose the region chosen by ROI cost
     mask = region_labels==np.array(candidate+1,dtype='int64')
-    region_labels[np.logical_not(mask)]=0
+    remove_holes(mask)
+    region_labels = mask.astype('int')
 
-    ax[1,0].imshow(region_labels)
-    ax[1,0].set_title('region chosen')
+    props = regionprops(region_labels)
+    # centroid = np.array(props[0].centroid)
+    #
+    # ax[1,0].imshow(region_labels)
+    # ax[1,0].set_title('region chosen')
+    #
+    # region_labels = closing(region_labels,disk(7))
+    # ax[1,1].imshow(region_labels)
+    # ax[1,1].set_title('region closed')
 
-    region_labels = closing(region_labels,disk(7))
-    ax[1,1].imshow(region_labels)
-    ax[1,1].set_title('region closed')
-    # plt.show()
-    # plt.pause(3)
-
-    inner,outer,bbox = extract_boundaries(region_labels)
-    return(inner,outer,bbox)
+    inner,outer,bbox,centroid = extract_boundaries(region_labels)
+    return(inner,outer,bbox,centroid)
 
 
 def extract_boundaries(region_labels):
@@ -306,25 +288,34 @@ def extract_boundaries(region_labels):
     """
     boundary = segmentation.find_boundaries(region_labels,mode='inner')
     boundaries = label(boundary)
-    bound_props = regionprops(boundaries)
-    boundary_order = np.argsort([r.filled_area for r in bound_props])+1
+    new_boundaries = np.zeros_like(boundaries)
+    # try to remove funky regions
+    for ii in range(np.max(boundaries)):
+        edge = boundaries ==ii+1
+        edge = morphology.skeletonize(closing(edge,disk(3)))
+        new_boundaries[edge]=(ii+1)
+
+
+    bound_props = regionprops(new_boundaries)
+    boundary_order = np.argsort([r.convex_area for r in bound_props])+1
     if len(boundary_order)==1:
-        outer = boundaries==boundary_order[0]
+        outer = new_boundaries==boundary_order[0]
         inner = outer
         bbox = bound_props[0].bbox
         print('Inner and outer follicle are indistinguishable')
     else:
-        outer = boundaries==boundary_order[1]
-        inner = boundaries==boundary_order[0]
+        outer = new_boundaries==boundary_order[1]
+        inner = new_boundaries==boundary_order[0]
+    # try to remove funky regions
     bboxes = np.array([list(x.bbox) for x in bound_props])
     x_bot = np.min(bboxes[:,0],axis=0)
     y_bot = np.min(bboxes[:,1],axis=0)
     x_top = np.max(bboxes[:,2],axis=0)
     y_top = np.max(bboxes[:,3],axis=0)
     bbox = (x_bot,y_bot,x_top,y_top)
+    centroid = regionprops(label(inner))[0].centroid
 
-
-    return(inner,outer,bbox)
+    return(inner,outer,bbox,centroid)
 
 
 def get_ellipse_fit_cost(region):
@@ -465,8 +456,30 @@ def clean_region(region_bw,I_sub):
     vals = vals[bw_idx]
     T = filters.threshold_yen(vals)
     new_bw = (I_sub<T)*region_bw
-
+    # try find contours
     return(new_bw)
+
+
+def remove_holes(region_bw):
+    holes = label(np.invert(region_bw))
+    props = regionprops(holes)
+    idx = np.argsort([r.filled_area for r in props])
+    corners =np.array([[0,0],
+                       [0,region_bw.shape[1]-1],
+                       [region_bw.shape[0]-1,0],
+                       [region_bw.shape[0]-1,region_bw.shape[1]-1]])
+    # This is probably not the prettiest implementation
+    rm_idx = []
+    for ii in idx:
+        for corner in corners:
+            if np.any(np.all(corner==props[ii].coords,axis=1)):
+                rm_idx.append(ii)
+    rm_idx = set(rm_idx)
+    idx = [x for x in idx if x not in rm_idx]
+
+    # FIll all but the last (largest) hole
+    for ii in idx[:-1]:
+        region_bw[props[ii].coords[:,0],props[ii].coords[:,1]] =True
 
 
 
@@ -498,22 +511,19 @@ def find_all_in_slice(I,fol_dict,slice_num):
         rr[rr>=I.shape[0]]=I.shape[0]-1
         cc[cc>=I.shape[1]]=I.shape[1]-1
         I_sub = I[rr,cc].T
-        # plt.imshow(I_sub)
-        # plt.pause(0.4)
 
         try:
-            inner,outer,bbox=extract_mask(I_sub)
+            inner,outer,bbox,centroid=extract_mask(I_sub)
         except:
             print('No data found in fol {}'.format(id))
             continue
 
-        plt.close('all')
-        fig,ax = plt.subplots(1,2)
         # convert the bounding box from a list of 4 to a mask
         bbox = draw.rectangle(bbox[:2],bbox[2:])
         # Show the user the found follicle bounds
         I_temp = color.gray2rgb(I_sub)
         bbox = expand_bbox(bbox)
+        fig,ax = plt.subplots(1,2)
         I_temp[inner] = (250,0,0)
         I_temp[outer] = (0,250,0)
         ax[0].imshow(I_temp)
@@ -524,6 +534,10 @@ def find_all_in_slice(I,fol_dict,slice_num):
         rect = patches.Rectangle(coord[::-1],w,h,linewidth=2,edgecolor='r',facecolor='none')
         ax[1].add_patch(rect)
         ax[0].set_title('Follicle {}'.format(id))
+        ax[0].plot(centroid[1],centroid[0],'o')
+        plt.show()
+        plt.pause(0.1)
+
 
         # Map the ROI points back to the full image
         inner_row,inner_col = np.where(inner)
@@ -536,12 +550,13 @@ def find_all_in_slice(I,fol_dict,slice_num):
         outer_col+=np.min(cc)
         outer_pts = (outer_row,outer_col)
 
+        centroid += [np.min(rr),np.min(cc)]
         fix_bounds(inner_pts,Ifull_temp)
         fix_bounds(outer_pts,Ifull_temp)
         mask_inner = mask_final_points(I,inner_pts)
         mask_outer = mask_final_points(I,outer_pts)
 
-        # Plot the found follicle
+        # Plot the found follicle in full image
         Ifull_temp[mask_inner] = (0,250,0)
         Ifull_temp[mask_outer] = (250,0,0)
 
@@ -549,10 +564,11 @@ def find_all_in_slice(I,fol_dict,slice_num):
         fol.add_inner(slice_num,inner_pts)
         fol.add_outer(slice_num,inner_pts)
         fol.add_bbox(slice_num,bbox)
+        fol.add_centroid(slice_num,centroid)# in row,col notation
 
     # Show the user the tracked pad
     plt.imshow(Ifull_temp)
-    plt.pause(0)
+
 
 
 def propgate_ROI(I0,I1,fol_dict):
@@ -566,13 +582,27 @@ def propgate_ROI(I0,I1,fol_dict):
     pass
 
 
+
+
+
 if __name__=='__main__':
     filename = r'C:\Users\nbush257\Desktop\regPad2_2018_0131.tif'
     slice_num = int(filename[-8:-4])
+    bbox_fname = r'C:\Users\nbush257\Desktop\bbox_{:04}.pckl'.format(slice_num)
     I = io.imread(filename)
     # major_box = ui_major_bounding_box(I)
     # fol_dict = user_get_fol_bounds(I,major_box,1)
-    bbox_dict = find_all_bounding_boxes(I,min_size=5000,cost_thresh=250)
+
+    # only have to get the bbox_dict once
+    if os.path.isfile(bbox_fname):
+        with open(bbox_fname,'r') as bbox_file:
+            bbox_dict = pickle.load(bbox_file)
+    else:
+        bbox_dict = find_all_bounding_boxes(I,min_size=4000,cost_thresh=250)
+        with open(bbox_fname,'w') as bbox_file:
+            pickle.dump(bbox_dict,bbox_file)
+
+
     fol_dict = bbox_to_fol_dict(bbox_dict,slice_num)
     find_all_in_slice(I,fol_dict,slice_num)
 
