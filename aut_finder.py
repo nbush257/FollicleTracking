@@ -217,6 +217,7 @@ def extract_mask(I_sub,thresh_size=1000):
     :return: inner, outer, bbox points of the inner and outer extents of the follicle
     """
     # Get the thresholded image to extract the follicle from
+    fig,ax = plt.subplots(2,2)
     I_sub = filters.median(I_sub)
     I_sub = exposure.equalize_hist(I_sub)
     g = filters.frangi(I_sub)
@@ -227,6 +228,8 @@ def extract_mask(I_sub,thresh_size=1000):
 
     bw = g>T
     bw = closing(bw,disk(3))
+    ax[0].imshow(g)
+    ax[1].imshow(bw)
 
     # extract the desired region
     region_labels = label(bw)
@@ -247,7 +250,9 @@ def extract_mask(I_sub,thresh_size=1000):
     # Remove the non propdesired regions from the label set
     mask = region_labels==np.array(candidate+1,dtype='int64')
     region_labels[np.logical_not(mask)]=0
-
+    ax[2].imshow(region_labels)
+    plt.show()
+    plt.pause(0.5)
     inner,outer,bbox = extract_boundaries(region_labels)
     return(inner,outer,bbox)
 
@@ -397,6 +402,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
             continue
             # hough_ellipse_finder(I_sub)
 
+        fig,ax = plt.subplots(1,2)
         # convert the bounding box from a list of 4 to a mask
         bbox = draw.rectangle(bbox[:2],bbox[2:])
         # Show the user the found follicle bounds
@@ -404,7 +410,10 @@ def find_all_in_slice(I,fol_dict,slice_num):
         bbox = expand_bbox(bbox)
         I_temp[inner] = (250,0,0)
         I_temp[outer] = (0,250,0)
-        plt.imshow(I_temp)
+        ax[0].imshow(I_temp)
+        ax[1].imshow(I)
+        rect = ppatches.Rectangle(coord,w,h,linewidth=2,edgecolor='r',facecolor='none')
+        ax[1].add_patch(rect)
         plt.title('Follicle {}'.format(id))
         plt.pause(0.2)
 
@@ -444,7 +453,7 @@ def propgate_ROI(I0,I1,fol_dict):
 
 
 if __name__=='__main__':
-    filename = r'L:\Users\guru\Documents\hartmann_lab\data\Pad2_2018\Pad2_2018\registered\regPad2_2018_0131.tif'
+    filename = r'C:\Users\nbush257\Desktop\regPad2_2018_0131.tif'
     I = io.imread(filename)
     major_box = ui_major_bounding_box(I)
     fol_dict = user_get_fol_bounds(I,major_box,1)
