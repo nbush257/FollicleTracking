@@ -534,6 +534,24 @@ def remove_holes(region_bw):
         region_bw[props[ii].coords[:,0],props[ii].coords[:,1]] =True
 
 
+def mask_to_patch_coords(rr,cc):
+    r_min = np.min(rr)
+    r_max = np.max(rr)
+    c_min = np.min(cc)
+    c_max = np.max(cc)
+
+    h  =r_max-r_min
+    w = c_max-c_min
+    coord = [c_min,r_min]
+    return(coord,h,w)
+
+def mask_to_verts(rr,cc):
+    r_min = np.min(rr)
+    r_max = np.max(rr)
+    c_min = np.min(cc)
+    c_max = np.max(cc)
+
+    return(r_min,c_min,r_max,c_max)
 
 def mask_final_points(I,pts,width=5):
     bw = np.zeros(I.shape,dtype='bool')
@@ -586,6 +604,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
 
         try:
             inner,outer,bbox,centroid=extract_mask(I_sub)
+            bbox_out = bbox
         except:
             print('No data found in fol {}'.format(id))
             continue
@@ -645,7 +664,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
         # add the data to the follicle object
         fol.add_inner(slice_num,inner_pts)
         fol.add_outer(slice_num,outer_pts)
-        fol.add_bbox(slice_num,bbox)
+        fol.add_bbox(slice_num,bbox_out)
         fol.add_centroid(slice_num,centroid)# in row,col notation
 
     # Show the user the tracked pad
@@ -691,15 +710,16 @@ def batch_ims(p_load,p_save):
             with open(bbox_fname,'w') as bbox_file:
                 pickle.dump(bbox_dict,bbox_file)
 
+        if len(fol_dict)>0:
+            if slice_num in fol_dict[1].inner.keys():
+                print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
+                continue
         if init:
             fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name)
             init = False
         else:
             fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name,fol_dict)
 
-        if slice_num in fol_dict[1].inner.keys():
-            print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
-            continue
         find_all_in_slice(I,fol_dict,slice_num)
         # save to a pickle file
         with open(save_fname,'w') as fid:
