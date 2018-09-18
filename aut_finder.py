@@ -6,7 +6,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 from skimage.morphology import closing,square,disk,label
-from skimage.measure import regionprops
+from skimage.measure import regionprops,EllipseModel
 
 
 class Follicle():
@@ -89,7 +89,7 @@ def ginput2boundingbox(a,b,mode='mask'):
     else:
         raise ValueError("Unknown mode of output requested. Must be 'mask' or 'verts'")
 
-    return(rr,cc)
+    return(cc,rr)
 
 
 def ui_major_bounding_box(I):
@@ -209,6 +209,32 @@ def plot_bbox_from_region(region,ax=None):
     ax.add_patch(rect)
 
 
+def ROI_cost(props,I_sub):
+    """
+    Uses a combination of distance to center, size, and ellips-likeness
+    to pick the best mask in the image
+    :param props:
+    :param I_sub:
+    :return:
+    """
+    e_fit_cost = []
+    center_dist_cost = []
+    for region in props:
+        e_fit_cost.append(get_ellipse_fit_cost(region))
+    ellip_idx = np.argsort(e_fit_cost)
+    size_idx = np.argsort([r.filled_area for r in props])[::-1]
+    dist = lambda(r): np.sum((r.centroid - np.divide(I_sub.shape, 2)) ** 2)
+    center_idx = np.argsort([dist(r) for r in props])
+    cost = np.empty(len(props),dtype='int')
+    for idx in range(len(props)):
+        cost[idx] = np.where(size_idx==idx)[0]+np.where(center_idx==idx)[0]+np.where(ellip_idx==idx)[0]
+    return(np.argmin(cost))
+
+
+
+
+
+
 def extract_mask(I_sub,thresh_size=1000):
     """
     Find ellipses in the follicle ROI
@@ -218,10 +244,10 @@ def extract_mask(I_sub,thresh_size=1000):
     """
     # Get the thresholded image to extract the follicle from
     fig,ax = plt.subplots(2,2)
-    I_sub = filters.median(I_sub)
-    I_sub = exposure.equalize_hist(I_sub)
+    # I_sub = filters.median(I_sub)
+    # I_sub = exposure.equalize_hist(I_sub)
     g = filters.frangi(I_sub)
-    thresh_size = min(I_sub.shape)/2
+    thresh_size = min(I_sub.shape)/5
     if thresh_size %2 ==0:
         thresh_size+=1
     T = filters.threshold_local(g,thresh_size)
@@ -235,17 +261,14 @@ def extract_mask(I_sub,thresh_size=1000):
     region_labels = label(bw)
     props = regionprops(region_labels)
     # remove small regions
-    idx = np.argsort([r.filled_area for r in props])[-10:]
+    idx = np.argsort([r.filled_area for r in props])[-4:]
     for ii in range(np.max(region_labels)):
         if ii not in idx:
             bw[region_labels==ii+1]=0
     region_labels = label(bw)
     props = regionprops(region_labels)
 
-    check_convex_metric = lambda(region): float(np.sum(region.convex_image))/region.filled_area
-
-    convex_idx = np.argsort([check_convex_metric(r) for r in props])
-    candidate = convex_idx[0]
+    candidate = ROI_cost(props,I_sub)
 
     # Remove the non propdesired regions from the label set
     mask = region_labels==np.array(candidate+1,dtype='int64')
@@ -266,16 +289,22 @@ def extract_boundaries(region_labels):
     boundary = segmentation.find_boundaries(region_labels,mode='inner')
     boundaries = label(boundary)
     bound_props = regionprops(boundaries)
-    boundary_order = np.argsort([r.area for r in bound_props])+1
+    boundary_order = np.argsort([r.filled_area for r in bound_props])+1
     if len(boundary_order)==1:
         outer = boundaries==boundary_order[0]
         inner = outer
-        bbox = bound_props[boundary_order[0]].bbox
+        bbox = bound_props[0].bbox
         print('Inner and outer follicle are indistinguishable')
     else:
         outer = boundaries==boundary_order[1]
         inner = boundaries==boundary_order[0]
-        bbox = bound_props[boundary_order[1]].bbox
+    bboxes = np.array([list(x.bbox) for x in bound_props])
+    x_bot = np.min(bboxes[:,0],axis=0)
+    y_bot = np.min(bboxes[:,1],axis=0)
+    x_top = np.max(bboxes[:,2],axis=0)
+    y_top = np.max(bboxes[:,3],axis=0)
+    bbox = (x_bot,y_bot,x_top,y_top)
+
 
     return(inner,outer,bbox)
 
@@ -319,6 +348,7 @@ def hough_ellipse_finder(I_sub):
 
 def find_all_bounding_boxes(I,size_thresh=500,cost_thresh=100):
 
+    print('Finding bouding boxes...')
     g = filters.frangi(I)
     T = filters.threshold_li(g)
     bw = g>T
@@ -342,23 +372,33 @@ def find_all_bounding_boxes(I,size_thresh=500,cost_thresh=100):
     region_labels = label(skel)
     props = regionprops(region_labels)
     bounding_box_dict = defaultdict()
+    plt.imshow(I)
+    ax = plt.gca()
     for ii,region in enumerate(props):
-        box = region.bbox +np.array(np.min(region.coords[:,0]),np.min(region.coords[:,1]))
+        box = region.bbox
         bounding_box_dict[ii]=box
 
         #Plot
-        coord = box[:2]
+        coord = box[:2][::-1]
         w = box[3]-box[1]
         h = box[2]-box[0]
         rect = patches.Rectangle(coord,w,h,linewidth=2,edgecolor='r',facecolor='none')
         ax.add_patch(rect)
-
-
+    plt.show()
 
     return(bounding_box_dict)
 
 
+def bbox_to_fol_dict(bbox_dict,slice_num):
+    fol_dict = defaultdict()
+    count=0
+    for box in bbox_dict.itervalues():
+        count+=1
+        F = Follicle(count)
+        F.add_bbox(slice_num=slice_num,box=box)
+        fol_dict[count] = F
 
+    return(fol_dict)
 
 def expand_bbox(box,expansion=0.5):
     """
@@ -367,15 +407,33 @@ def expand_bbox(box,expansion=0.5):
     :param expansion: the percentage to expand each dimension by [0,1]. Default: 0.5
     :return:
     """
-    x_bds = np.array([np.min(box[1]),np.max(box[1])])
-    y_bds = np.array([np.min(box[0]),np.max(box[0])])
+    if len(box)==4:
+        x_bds = np.array([box[1],box[3]])
+        y_bds = np.array([box[0],box[2]])
+    else:
+        x_bds = np.array([np.min(box[1]),np.max(box[1])])
+        y_bds = np.array([np.min(box[0]),np.max(box[0])])
+
     w = np.abs(np.diff(x_bds))
     h = np.abs(np.diff(y_bds))
-    pad_w = int(w*expansion/2)
-    pad_h = int(h*expansion/2)
+    if type(expansion) is list:
+        pad_w = expansion[0]
+        pad_h = expansion[1]
+    else:
+        pad_w = int(w*expansion/2)
+        pad_h = int(h*expansion/2)
+
     x_bds+=[-pad_w,pad_w]
     y_bds+=[-pad_h,pad_h]
+    # check boundary of im
+    x_bds[x_bds<0]=0
+    y_bds[y_bds<0]=0
+
     return(draw.rectangle((y_bds[0], x_bds[0]), (y_bds[1], x_bds[1])))
+
+def fix_bounds(pts,I):
+    pts[0][pts[0]>I.shape[0]] = I.shape[0]-1
+    pts[1][pts[1]>I.shape[1]] = I.shape[1]-1
 
 
 def find_all_in_slice(I,fol_dict,slice_num):
@@ -393,8 +451,12 @@ def find_all_in_slice(I,fol_dict,slice_num):
 
     for id,fol in fol_dict.iteritems():
         # Get an ROI and find the follicle
-        rr,cc = expand_bbox(fol.bbox[slice_num])
+        rr,cc = expand_bbox(fol.bbox[slice_num],0.5)
+        rr[rr>=I.shape[0]]=I.shape[0]-1
+        cc[cc>=I.shape[1]]=I.shape[1]-1
         I_sub = I[rr,cc]
+        plt.imshow(I_sub)
+        plt.pause(0.4)
         try:
             inner,outer,bbox=extract_mask(I_sub)
         except:
@@ -427,6 +489,13 @@ def find_all_in_slice(I,fol_dict,slice_num):
         outer_ypts+=np.min(rr)
         outer_pts = (outer_ypts,outer_xpts)
 
+        fix_bounds(inner_pts,I_temp)
+        fix_bounds(outer_pts,I_temp)
+
+
+
+
+
         # Plot the found follicle
         Ifull_temp[inner_pts] = (0,250,0)
         Ifull_temp[outer_pts] = (250,0,0)
@@ -437,8 +506,9 @@ def find_all_in_slice(I,fol_dict,slice_num):
         fol.add_bbox(slice_num,bbox)
 
     # Show the user the tracked pad
+    #TODO: Fix the mapping back to the major image
     plt.imshow(Ifull_temp)
-    plt.pause()
+    plt.pause(0)
 
 
 def propgate_ROI(I0,I1,fol_dict):
@@ -456,8 +526,10 @@ if __name__=='__main__':
     filename = r'C:\Users\nbush257\Desktop\regPad2_2018_0131.tif'
     I = io.imread(filename)
     major_box = ui_major_bounding_box(I)
-    fol_dict = user_get_fol_bounds(I,major_box,1)
-    find_all_in_slice(I,fol_dict,1)
+    # fol_dict = user_get_fol_bounds(I,major_box,1)
+    bbox_dict = find_all_bounding_boxes(I[major_box],size_thresh=700,cost_thresh=250)
+    fol_dict = bbox_to_fol_dict(bbox_dict,1)
+    find_all_in_slice(I[major_box],fol_dict,1)
 
 
 
