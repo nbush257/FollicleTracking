@@ -453,7 +453,12 @@ def bbox_to_fol_dict(bbox_dict,slice_num,pad_name,fol_dict=None):
     else:
         for box in bbox_dict.itervalues():
             count+=1
-            fol_dict[count].add_bbox(slice_num=slice_num,box=box)
+            if count>= len(fol_dict):
+                F = Follicle(count,pad_name)
+                F.add_bbox(slice_num=slice_num,box=box)
+                fol_dict[count] = F
+            else:
+                fol_dict[count].add_bbox(slice_num=slice_num,box=box)
 
 
     return(fol_dict)
@@ -572,6 +577,8 @@ def find_all_in_slice(I,fol_dict,slice_num):
         print('\tWorking on Follicle {} of {}'.format(id,len(fol_dict)))
         # Get an ROI and find the follicle
         plt.close('all')
+        if slice_num not in fol.bbox:
+            continue
         rr,cc = expand_bbox(fol.bbox[slice_num],0.5)
         rr[rr>=I.shape[0]]=I.shape[0]-1
         cc[cc>=I.shape[1]]=I.shape[1]-1
@@ -672,8 +679,8 @@ def batch_ims(p_load,p_save):
 
 
     for filename in file_list:
-        print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
         slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
+        print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
         if slice_num in fol_dict[1].inner.keys():
             print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
             continue
