@@ -637,7 +637,8 @@ def find_all_in_slice(I,fol_dict,slice_num):
 
     # Show the user the tracked pad
     plt.close('all')
-    plt.imshow(Ifull_temp)
+    if plot_tgl:
+        plt.imshow(Ifull_temp)
 
 
 
@@ -654,12 +655,14 @@ def propgate_ROI(I0,I1,fol_dict):
 
 def batch_ims(p_load,p_save):
     init = True
+    file_list = glob.glob(os.path.join(p_load,'*.tif'))
+    filename = file_list[0]
     pad_name = re.search('Pad\d',filename).group()
     save_fname = os.path.join(p_save,'{}_follicles.pckl'.format(pad_name))
-    for filename in glob.glob(os.path.join(p_load,'*.tif')):
+    for filename in file_list:
         slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
         print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
-        bbox_fname = os.path.join(p_save,'bbox_{:04}.pckl'.format(slice_num))
+        bbox_fname = os.path.join(p_save,'bbox_{}.pckl'.format(slice_num))
         I = io.imread(filename)
         if os.path.isfile(bbox_fname):
             with open(bbox_fname,'r') as bbox_file:
