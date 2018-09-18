@@ -681,9 +681,6 @@ def batch_ims(p_load,p_save):
     for filename in file_list:
         slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
         print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
-        if slice_num in fol_dict[1].inner.keys():
-            print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
-            continue
         bbox_fname = os.path.join(p_save,'bbox_{}.pckl'.format(slice_num))
         I = io.imread(filename)
         if os.path.isfile(bbox_fname):
@@ -699,6 +696,10 @@ def batch_ims(p_load,p_save):
             init = False
         else:
             fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name,fol_dict)
+
+        if slice_num in fol_dict[1].inner.keys():
+            print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
+            continue
         find_all_in_slice(I,fol_dict,slice_num)
         # save to a pickle file
         with open(save_fname,'w') as fid:
