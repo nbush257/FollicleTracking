@@ -382,20 +382,23 @@ def find_all_bounding_boxes(I,min_size=500,max_size=1e6,cost_thresh=100):
     region_labels = label(skel)
     props = regionprops(region_labels)
     bounding_box_dict = defaultdict()
-    plt.imshow(I)
-    ax = plt.gca()
+    if plot_tgl:
+        plt.imshow(I)
+        ax = plt.gca()
     for ii,region in enumerate(props):
         box = region.bbox
         bounding_box_dict[ii]=box
 
         #Plot
-        coord = box[:2][::-1]
-        w = box[3]-box[1]
-        h = box[2]-box[0]
-        rect = patches.Rectangle(coord,w,h,linewidth=2,edgecolor='r',facecolor='none')
-        ax.add_patch(rect)
+        if plot_tgl:
+            coord = box[:2][::-1]
+            w = box[3]-box[1]
+            h = box[2]-box[0]
+            rect = patches.Rectangle(coord,w,h,linewidth=2,edgecolor='r',facecolor='none')
+            ax.add_patch(rect)
 
-    plt.show()
+    if plot_tgl:
+        plt.show()
 
     return(bounding_box_dict)
 
@@ -477,7 +480,7 @@ def remove_holes(region_bw):
     rm_idx = set(rm_idx)
     idx = [x for x in idx if x not in rm_idx]
 
-    # FIll all but the last (largest) hole
+    # Fill all but the last (largest) hole
     for ii in idx[:-1]:
         region_bw[props[ii].coords[:,0],props[ii].coords[:,1]] =True
 
@@ -521,23 +524,24 @@ def find_all_in_slice(I,fol_dict,slice_num):
         # convert the bounding box from a list of 4 to a mask
         bbox = draw.rectangle(bbox[:2],bbox[2:])
         # Show the user the found follicle bounds
-        I_temp = color.gray2rgb(I_sub)
         bbox = expand_bbox(bbox)
-        fig,ax = plt.subplots(1,2)
-        I_temp[inner] = (250,0,0)
-        I_temp[outer] = (0,250,0)
-        ax[0].imshow(I_temp)
-        ax[1].imshow(I,'gray')
-        coord = fol.bbox[slice_num][:2]
-        w = fol.bbox[slice_num][3]-fol.bbox[slice_num][1]
-        h = fol.bbox[slice_num][2]-fol.bbox[slice_num][0]
-        rect = patches.Rectangle(coord[::-1],w,h,linewidth=2,edgecolor='r',facecolor='none')
-        ax[1].add_patch(rect)
-        ax[0].set_title('Follicle {}'.format(id))
-        ax[0].plot(centroid[1],centroid[0],'o')
-        plt.show()
-        plt.pause(0.1)
-
+        # Plot
+        if plot_tgl:
+            I_temp = color.gray2rgb(I_sub)
+            fig,ax = plt.subplots(1,2)
+            I_temp[inner] = (250,0,0)
+            I_temp[outer] = (0,250,0)
+            ax[0].imshow(I_temp)
+            ax[1].imshow(I,'gray')
+            coord = fol.bbox[slice_num][:2]
+            w = fol.bbox[slice_num][3]-fol.bbox[slice_num][1]
+            h = fol.bbox[slice_num][2]-fol.bbox[slice_num][0]
+            rect = patches.Rectangle(coord[::-1],w,h,linewidth=2,edgecolor='r',facecolor='none')
+            ax[1].add_patch(rect)
+            ax[0].set_title('Follicle {}'.format(id))
+            ax[0].plot(centroid[1],centroid[0],'o')
+            plt.show()
+            plt.pause(0.1)
 
         # Map the ROI points back to the full image
         inner_row,inner_col = np.where(inner)
@@ -550,7 +554,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
         outer_col+=np.min(cc)
         outer_pts = (outer_row,outer_col)
 
-        centroid += [np.min(rr),np.min(cc)]
+        centroid += np.array([np.min(rr),np.min(cc)])
         fix_bounds(inner_pts,Ifull_temp)
         fix_bounds(outer_pts,Ifull_temp)
         mask_inner = mask_final_points(I,inner_pts)
@@ -586,9 +590,12 @@ def propgate_ROI(I0,I1,fol_dict):
 
 
 if __name__=='__main__':
+    plot_tgl = True
     filename = r'C:\Users\nbush257\Desktop\regPad2_2018_0131.tif'
+    filename = r'L:\Users\guru\Documents\hartmann_lab\data\Pad2_2018\Pad2_2018\registered\regPad2_2018_0131.tif'
     slice_num = int(filename[-8:-4])
-    bbox_fname = r'C:\Users\nbush257\Desktop\bbox_{:04}.pckl'.format(slice_num)
+    bbox_fname = r'C:\Users\guru\Desktop\bbox_{:04}.pckl'.format(slice_num)
+    # bbox_fname = r'C:\Users\nbush257\Desktop\bbox_{:04}.pckl'.format(slice_num)
     I = io.imread(filename)
     # major_box = ui_major_bounding_box(I)
     # fol_dict = user_get_fol_bounds(I,major_box,1)
