@@ -186,6 +186,27 @@ def plot_bbox_from_region(region,ax=None):
     rect = patches.Rectangle(coord, w, h, linewidth=5, edgecolor='r', facecolor='none')
     ax.add_patch(rect)
 
+def angle_cost(region_labels):
+    """
+    calculates between 0 and 2Pi how much the region surrounds the circle
+    :param region_labels:
+    :return:
+    """
+    center = np.array(region_labels.shape)/2
+    skel = morphology.skeletonize(region_labels>0)
+    skel_labels = label(skel)
+    skel_props = regionprops(skel_labels)
+    region_angle_extent = []
+    for region in skel_props:
+        pts = region.coords
+        d_pts = pts-center
+        degs = np.arctan2(d_pts[:,0],d_pts[:,1])
+        degs = np.unwrap(degs)
+        region_angle_extent.append(np.ptp(degs))
+    return(region_angle_extent)
+
+
+
 
 def ROI_cost(props,I_sub):
     """
@@ -205,7 +226,7 @@ def ROI_cost(props,I_sub):
     center_idx = np.argsort([dist(r) for r in props])
     cost = np.empty(len(props),dtype='int')
     for idx in range(len(props)):
-        cost[idx] = np.where(size_idx==idx)[0]+np.where(center_idx==idx)[0]+np.where(ellip_idx==idx)[0]
+        cost[idx] = np.where(size_idx==idx)[0]+np.where(ellip_idx==idx)[0]
     return(np.argmin(cost))
 
 
@@ -221,7 +242,7 @@ def centroid_distance_cost(region):
     return(np.var(D))
 
 
-def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.05,area_thresh=1000):
+def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.05,area_thresh=1000,angle_extent_thresh=2*np.pi/1.1):
     """
     Find ellipses in the follicle ROI
     :param I_sub: Sub image of just the follicle ROI
@@ -252,11 +273,15 @@ def extract_mask(I_sub,thresh_size=1000,ratio_thresh=0.05,area_thresh=1000):
     area_ratio = np.array([np.divide(float(r.bbox_area),np.prod(I_sub.shape)) for r in props])
     idx = np.where(np.logical_and(area_ratio>ratio_thresh,area>area_thresh))[0]
     contains_centroid = [r.image[int(r.local_centroid[0]),int(r.local_centroid[1])] for r in props]
+    angle_extent = angle_cost(region_labels)
     for ii in range(np.max(region_labels)):
         if contains_centroid[ii]:# remove regions that are filled at the centroid
             bw[region_labels==ii+1]=0
         if ii not in idx: # remove regions that dont meet the threshold criterion.
             bw[region_labels==ii+1]=0
+        if angle_extent[ii]<angle_extent_thresh:
+            bw[region_labels==ii]=0
+
 
     region_labels = label(bw)
     props = regionprops(region_labels)
@@ -588,6 +613,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
         fol.add_centroid(slice_num,centroid)# in row,col notation
 
     # Show the user the tracked pad
+    plt.close('all')
     plt.imshow(Ifull_temp)
 
 
