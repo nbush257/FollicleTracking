@@ -1,5 +1,5 @@
 from scipy.spatial import distance
-from skimage import transform,draw,feature,io,filters,segmentation,color,exposure,morphology
+from skimage import transform,draw,feature,io,filters,segmentation,color,exposure,morphology,measure
 from skimage.draw import ellipse_perimeter
 from matplotlib import patches
 from collections import defaultdict
@@ -491,6 +491,23 @@ def mask_final_points(I,pts,width=5):
     bw[pts] = True
     bw = morphology.binary_dilation(bw,disk(4))
     return(np.where(bw)) #rr,cc
+
+def extract_contour(edge,I_sub,mode):
+    """
+    use the found edges to define a mask and extract contours from that mask
+    :param edge:
+    :param I_sub:
+    :param mode: 'inner' or 'outer'
+    :return:
+    """
+    edge = morphology.dilation(edge,disk(5))
+    vals = I_sub[np.where(edge)]
+    T = filters.threshold_otsu(vals)
+    if mode=='inner':
+        contours = measure.find_contours(I_sub*edge,T)[0]
+    elif mode == 'outer':
+        contours = measure.find_contours(I_sub*edge,T,fully_connected='high')[1]
+    return(contours)
 
 
 
