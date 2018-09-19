@@ -576,6 +576,23 @@ def extract_contour(edge,I_sub,mode):
         contours = measure.find_contours(I_sub*edge,T,fully_connected='high')[1]
     return(contours)
 
+def check_box_has_corner(I,bbox):
+    """
+    use this to remove ROIs that touch the corners of the image
+    :param I:
+    :param bbox:
+    :return:
+    """
+    if len(bbox)!=4:
+        raise ValueError('Bounding box is in the wrong format. Need a 4 length set')
+    # Get the extent of the image
+    c = [int(x) for x in I.shape]
+    c = set(list(c+[0]))
+    bbox = set(bbox)
+    # This is probably not the prettiest implementation
+    if len(c.intersection(bbox))>0:
+        return True
+    return False
 
 
 def find_all_in_slice(I,fol_dict,slice_num):
@@ -684,6 +701,21 @@ def propgate_ROI(I0,I1,fol_dict):
     """
     pass
 
+def remove_corner_bboxes(bbox_dict,I):
+    """
+    run this after finding the bounding boxes to remove
+    boxes that touch the corners.
+    #TODO: Make it so that boxes that are near the corners and not just touching are removed
+    :return:
+    """
+
+    rm_key = []
+    for slice,box in bbox_dict.iteritems():
+        if check_box_has_corner(I,box):
+            rm_key.append(slice)
+    for key in rm_key:
+        bbox_dict.pop(key)
+
 
 def batch_ims(p_load,p_save):
     init = True
@@ -698,7 +730,7 @@ def batch_ims(p_load,p_save):
 
 
     for filename in file_list:
-        slice_num = re.search('_\d{4}\.',filename).group()[1:-1]
+        slice_num = re.search('\d{4}\.',filename).group()[:-1]
         print('Working on {}\n\tslice{}'.format(pad_name,slice_num))
         bbox_fname = os.path.join(p_save,'bbox_{}.pckl'.format(slice_num))
         I = io.imread(filename)
@@ -710,15 +742,18 @@ def batch_ims(p_load,p_save):
             with open(bbox_fname,'w') as bbox_file:
                 pickle.dump(bbox_dict,bbox_file)
 
-        if len(fol_dict)>0:
-            if slice_num in fol_dict[1].inner.keys():
-                print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
-                continue
+        remove_corner_bboxes(bbox_dict,I)
+
         if init:
             fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name)
             init = False
         else:
             fol_dict = bbox_to_fol_dict(bbox_dict,slice_num,pad_name,fol_dict)
+
+        if len(fol_dict)>0:
+            if slice_num in fol_dict[1].inner.keys():
+                print('\nAlready_ tracked slice {}. Skipping...'.format(slice_num))
+                continue
 
         find_all_in_slice(I,fol_dict,slice_num)
         # save to a pickle file
