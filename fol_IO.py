@@ -10,6 +10,7 @@ import re
 from skimage import draw
 from mpl_toolkits import mplot3d
 
+
 def load_fol_data(fol_data_file):
     with open(fol_data_file,'r') as fid:
         fol_dict = pickle.load(fid)
@@ -58,6 +59,41 @@ def plot_all_bboxes(fol_dict,I_file):
         coord,h,w = mask_to_patch_coords(*bbox)
         rect = patches.Rectangle(coord,w,h,facecolor='none',edgecolor='r',linewidth=3)
         plt.gca().add_patch(rect)
+
+## ============= Convert follicle object ============= ##
+""" The Follicle object doesnt make sense, I'm changing it to a slice dict"""
+def convert_fol_dict(fd):
+    sd = collections.defaultdict()
+    # init the sd dict
+    for slice in fd[1].bbox.iterkeys():
+        sd[int(slice)] = collections.defaultdict()
+
+    for id,fol in fd.iteritems():
+        for slice in fol.bbox.iterkeys():
+            sd[int(slice)][id] = {}
+            if slice in fol.bbox.keys():
+                sd[int(slice)][id]['bbox'] = fol.bbox[slice]
+            if slice in fol.inner.keys():
+                sd[int(slice)][id]['inner'] = fol.inner[slice]
+            if slice in fol.outer.keys():
+                sd[int(slice)][id]['outer'] = fol.outer[slice]
+            if slice in fol.centroid.keys():
+                sd[int(slice)][id]['centroid'] = fol.centroid[slice]
+    return(sd)
+
+
+def convert_fol_dict_file(fol_file):
+    fd = load_fol_data(fol_file)
+    slice_dict_name = os.path.splitext(fol_file)[0]+'_sd.pckl'
+    sd = convert_fol_dict(fd)
+    with open(slice_dict_name,'w') as fid:
+        pickle.dump(sd,fid)
+    print('Wrote slice dict to {}'.format(slice_dict_name))
+
+
+
+
+
 
 
 ## ============== Alignment code needs work ======= #
