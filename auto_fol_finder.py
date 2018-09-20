@@ -555,7 +555,9 @@ def mask_to_verts(rr,cc):
 
 def mask_final_points(I,pts,width=5):
     bw = np.zeros(I.shape,dtype='bool')
-    bw[pts] = True
+    # make sure the points are still in the image
+    idx = np.logical_or(pts[0]<I.shape[0],pts[1]<I.shape[1])
+    bw[pts[0][idx],pts[1][idx]] = True
     bw = morphology.binary_dilation(bw,disk(4))
     return(np.where(bw)) #rr,cc
 
