@@ -1,4 +1,7 @@
+from scipy.spatial import distance
 import collections
+import sklearn
+import pandas as pd
 from scipy.spatial import distance
 from auto_fol_finder import Follicle
 import numpy as np
@@ -61,7 +64,7 @@ def plot_all_bboxes(fol_dict,I_file):
         plt.gca().add_patch(rect)
 
 ## ============= Convert follicle object ============= ##
-""" The Follicle object doesnt make sense, I'm changing it to a slice dict"""
+""" The Follicle object doesnt make sense, I'm changing it to a 'slice dict'"""
 def convert_fol_dict(fd):
     sd = collections.defaultdict()
     # init the sd dict
@@ -89,6 +92,36 @@ def convert_fol_dict_file(fol_file):
     with open(slice_dict_name,'w') as fid:
         pickle.dump(sd,fid)
     print('Wrote slice dict to {}'.format(slice_dict_name))
+
+
+def sd_to_centroids():
+
+    def cost(current,next):
+        D = distance.cdist(current[['x','y']].as_matrix(),next[['x','y']].as_matrix())
+        D = np.min(D,axis=1)
+
+
+    temp = []
+    for slice_num, slice in sd.iteritems():
+        for id,fol in slice.iteritems():
+            if 'centroid' in fol.keys():
+
+                temp.append([slice_num,id,fol['centroid'][0],fol['centroid'][1]])
+
+    df_centroid = pd.DataFrame(data=temp,columns=['slice_num','id','x','y'])
+    X = df_centroid[['x','y','slice_num']].as_matrix()
+    for slice in df_centroid['slice_num'].unique():
+        current = df_centroid.loc[df_centroid.slice_num==slice,['x','y']]
+        next = df_centroid.loc[df_centroid.slice_num==slice+1,['x','y']]
+
+
+
+
+
+
+
+
+
 
 
 
