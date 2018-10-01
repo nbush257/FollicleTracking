@@ -556,7 +556,7 @@ def mask_to_verts(rr,cc):
 def mask_final_points(I,pts,width=5):
     bw = np.zeros(I.shape,dtype='bool')
     # make sure the points are still in the image
-    idx = np.logical_or(pts[0]<I.shape[0],pts[1]<I.shape[1])
+    idx = np.logical_and(pts[0]<I.shape[0],pts[1]<I.shape[1])
     bw[pts[0][idx],pts[1][idx]] = True
     bw = morphology.binary_dilation(bw,disk(4))
     return(np.where(bw)) #rr,cc
@@ -623,7 +623,7 @@ def find_all_in_slice(I,fol_dict,slice_num):
 
         try:
             inner,outer,bbox,centroid=extract_mask(I_sub)
-            bbox_out = bbox
+            bbox_out = np.array(bbox)
         except:
             print('No data found in fol {}'.format(id))
             continue
@@ -676,8 +676,8 @@ def find_all_in_slice(I,fol_dict,slice_num):
 
         centroid += np.array([np.min(rr),np.min(cc)])
         # map bbox back to image
-        bbox[0] +=np.min(rr)
-        bbox[1] +=np.min(cc)
+        bbox_out[0::2] +=np.min(rr)
+        bbox_out[1::2] +=np.min(cc)
 
 
         # add the data to the follicle object
