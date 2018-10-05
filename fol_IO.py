@@ -82,8 +82,10 @@ def plot_all_fols(slice_dict,I_file):
     for fol in slice.itervalues():
         inner = fol['inner']
         outer = fol['outer']
-        plt.plot(inner[1],inner[0],'r.',markersize=1)
-        plt.plot(outer[1],outer[0],'g.',markersize=1)
+        if inner:
+            plt.plot(inner[1],inner[0],'r.',markersize=1)
+        if outer:
+            plt.plot(outer[1],outer[0],'g.',markersize=1)
 
 def plot_all_bboxes(slice_dict,I_file):
 
