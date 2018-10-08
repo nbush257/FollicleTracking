@@ -3,7 +3,7 @@ from helpers import *
 from scipy.spatial.distance import *
 
 
-class fol_clicker(object):
+class FolClicker(object):
     def __init__(self):
         self.fig = plt.figure(figsize=(14, 7))
         self.ax1 = self.fig.add_subplot(121)
@@ -12,7 +12,7 @@ class fol_clicker(object):
 
         cid = fig.canvas.mpl_connect('button_press_event', onclick)
 
-    def onclick(event):
+    def on_click(self, event):
         #     global click_points
         print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
               ('double' if event.dblclick else 'single', event.button,
@@ -26,4 +26,17 @@ class fol_clicker(object):
         if event.dblclick:
             click_points.append([event.xdata, event.ydata])
 
-    cid = fig.canvas.mpl_connect('button_press_event', onclick)
+    def on_key(self, event):
+        # keypress reader
+        def on_key(event):
+            print('you pressed', event.key, event.xdata, event.ydata)
+
+
+
+
+
+
+    cid = fig.canvas.mpl_connect('key_press_event', on_key)
+
+
+    cid = fig.canvas.mpl_connect('button_press_event', on_click)
