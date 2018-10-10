@@ -6,6 +6,7 @@ from scipy.spatial.distance import *
 import copy
 
 POINT_SIZE = 10
+LABEL_THRESH = 100
 
 IDLE = 0
 INIT = 1
@@ -18,12 +19,13 @@ for a in 'abcde':
         LABELS.append(a + str(i))
 for a in 'abcde':
         LABELS.append(a + str(0))
+LABELS.append('na')
 
 MARKERS = []
-
 for b in ['o', '^', 's', '+', 'd', '*']:
-    for a in ['b', 'g', 'r', 'c', 'm', 'y']:
+    for a in ['y', 'm', 'r', 'c', 'g', 'b']:
         MARKERS.append(a+b)
+MARKERS.append('w.')
 
 P_TYPE = {}
 for i in range(len(LABELS)):
@@ -147,7 +149,6 @@ def align_slices(points):
     error = []
     for r in range(360):
         rot = rotate_by_deg(points[1], midpoint2, r)
-        # add translation to rotated midpoints TODO
         mp = []
         for p in rot:
             mp.append([p[0] + trans[0], p[1] + trans[1]])
@@ -167,7 +168,7 @@ def align_slices(points):
     rad = rotation[error.index(min(error))]/10.
     rad = np.radians(rad)
 
-    return trans, rad
+    return trans, rad, midpoint2
 
 
 class FolClicker(object):
@@ -186,7 +187,7 @@ class FolClicker(object):
         self.cidb = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         self.cidk = self.fig.canvas.mpl_connect('key_press_event', self.on_key)
 
-        self.click_state = MATCH_CENTROIDS
+        self.click_state = IDLE
         self.key_state = 0
 
         self.curr_label = ''
@@ -210,12 +211,22 @@ class FolClicker(object):
 
         self.ax_to_label = None
 
-        # TODO rot/trans of first slice to 0
+        self.change_click_state(MATCH_CENTROIDS)
+
+    def put_text(self, text):
+        self.fig.suptitle(text)
+        self.flush()
 
     def change_click_state(self, state):
+        if state == MATCH_CENTROIDS:
+            self.put_text('Click 2 pairs of matching centroids. Opposite corners are best.')
+
         self.click_state = state
 
     def change_key_state(self, state):
+        if state == LABEL:
+            self.put_text('Type 2 digit label.')
+
         self.key_state = state
 
     def on_click(self, event):
@@ -269,22 +280,22 @@ class FolClicker(object):
                     for i in range(2):
                         for k in self.centroids_to_align[i]:
                             points[i].append(self.slice_dict[self.curr_slice_key[i]]['fols'][k]['centroid'])
-                    trans, rot = align_slices(points)
+                    trans, rot, mid = align_slices(points)
 
                     self.slice_dict[self.curr_slice_key[1]]['rot_rad'] = \
                         rot + self.slice_dict[self.curr_slice_key[0]]['rot_rad']
                     self.slice_dict[self.curr_slice_key[1]]['trans'] = \
                         [trans[0] + self.slice_dict[self.curr_slice_key[0]]['trans'][0],
                          trans[1] + self.slice_dict[self.curr_slice_key[0]]['trans'][1]]
+                    self.slice_dict[self.curr_slice_key[1]]['mid'] = mid
 
                     plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
                     plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
                     self.fig.canvas.draw()
                     self.fig.canvas.flush_events()
                     self.change_click_state(IDLE)
-                    # TODO propagate labels
+                    self.propagate_labels()
                     # self.change_click_state()
-
 
 
     def on_key(self, event):
@@ -303,21 +314,86 @@ class FolClicker(object):
 
         if self.key_state == LABEL:
             self.curr_label += event.key
-            print(self.curr_label)
+            self.put_text(self.curr_label)
             if len(self.curr_label) >= 2:
                 if self.curr_label in LABELS:
                     self.slice_dict[self.slice_to_label]['fols'][self.fol_to_label]['label'] = self.curr_label
                     plot_point(self.ax_to_label,
                                self.slice_dict[self.slice_to_label]['fols'][self.fol_to_label]['centroid'],
                                P_TYPE[self.curr_label])
+                    if self.ax_to_label is self.ax_left:
+                        self.propagate_labels()
                     self.fig.canvas.draw()
                     self.fig.canvas.flush_events()
                     self.curr_label = ''
                     self.change_key_state(IDLE)
-                    # TODO propagate labels
-                    # TODO printout on fig?
                 else:
                     self.curr_label = ''
                     # TODO printout on fig?
                     pass  # reset label
+        elif self.key_state == IDLE:
+            if event.key == ' ':
+                # TODO go to next slide, if last slide write data
+                pass
+            elif event.key == 'r':
+                # TODO reset lining up follicles
+                pass
+            elif event.key == 'x':
+                # TODO remove slice from dict
+                pass
 
+
+    def propagate_labels(self):
+        # find closest LABELED centroid in left image to all centroids in right
+        # if within thresh distance, adopt label
+        # for all unlabeled points, check previous two slices
+        # TODO get shifted centroid list for both
+        cl = get_centroid_list(self.slice_dict[self.curr_slice_key[0]]['fols'])
+        cr = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['fols'])
+        cd = cdist(cl, cr)
+        min_cols = cd.min(axis=0)  # distance to closest point in first slice to all points in second slice
+        idx = []
+        for m in min_cols:
+            idx.append(np.where(cd == m)[0])
+
+        sorted_keys_l = sorted(self.slice_dict[self.curr_slice_key[0]]['fols'].keys())
+        sorted_keys_r = sorted(self.slice_dict[self.curr_slice_key[1]]['fols'].keys())
+
+        # TODO make sure it doesn't overwrite labels you wanted to change
+        # TODO add same label to label to centroids on top of each other
+        # TODO add no label 'na'
+        # TODO text on figure while labeling
+
+        for i in range(len(min_cols)):
+            if min_cols[i] < LABEL_THRESH:
+                kl = sorted_keys_l[int(idx[i])]
+                kr = sorted_keys_r[i]
+                if 'label' in self.slice_dict[self.curr_slice_key[0]]['fols'][kl].keys():
+                    self.slice_dict[self.curr_slice_key[1]]['fols'][kr]['label'] = \
+                        self.slice_dict[self.curr_slice_key[0]]['fols'][kl]['label']
+        for kr in sorted_keys_r:
+            if 'label' in self.slice_dict[self.curr_slice_key[1]]['fols'][kr].keys():
+                point = self.slice_dict[self.curr_slice_key[1]]['fols'][kr]['centroid']
+                color = P_TYPE[self.slice_dict[self.curr_slice_key[1]]['fols'][kr]['label']]
+                plot_point(self.ax_right, point, color)
+
+        for kl in sorted_keys_l:
+            if 'label' in self.slice_dict[self.curr_slice_key[0]]['fols'][kl].keys():
+                point = self.slice_dict[self.curr_slice_key[0]]['fols'][kl]['centroid']
+                color = P_TYPE[self.slice_dict[self.curr_slice_key[0]]['fols'][kl]['label']]
+                plot_point(self.ax_left, point, color)
+
+        self.flush()
+
+    def flush(self):
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+
+
+
+if __name__ == '__main__':
+    # arg - directory with images
+    # arg - name of slice dict
+    # start tracker
+    pass
