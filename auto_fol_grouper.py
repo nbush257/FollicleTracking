@@ -7,6 +7,7 @@ import copy
 
 POINT_SIZE = 10
 LABEL_THRESH = 100
+SAME_FOL_DIST = 100
 
 IDLE = 0
 INIT = 1
@@ -70,27 +71,6 @@ def find_closest_centroid(point, d_slice):
     return centroids[idx], sorted(d_slice)[idx]  # key of centroid nearest to point
 
 
-def calc_rotation(centroids_to_allign):
-    """
-    calculate midpoints
-    translate second midpoint to match first
-    iterate over rotations to minimize distance between correspoinding centroids
-    :param centroids_to_allign:
-    :return: rotation in radians
-    """
-    return 0
-
-
-def match_labels(sd1, sd2):
-    """
-
-    :param sd1:
-    :param sd2:
-    :return:
-    """
-    pass
-
-
 def plot_point(ax, point, color):
     ax.plot(point[1], point[0], color)
 
@@ -120,6 +100,14 @@ def plot_centroids(ax, d_slice, color):
 
 def rotate_by_deg(points, origin, r):
     r = np.radians(r)
+    rot = []
+    cos_r, sin_r = np.cos(r), np.sin(r)
+    ox, oy = origin[0], origin[1]
+    for p in points:
+        rot.append([ox + (p[0]-ox) * cos_r - (p[1]-oy) * sin_r, oy + (p[0]-ox) * sin_r + (p[1]-oy) * cos_r])
+    return rot
+
+def rotate_by_rad(points, origin, r):
     rot = []
     cos_r, sin_r = np.cos(r), np.sin(r)
     ox, oy = origin[0], origin[1]
@@ -171,6 +159,35 @@ def align_slices(points):
     return trans, rad, midpoint2
 
 
+def translate(points, trans):
+    translated_points = []
+    for p in points:
+        translated_points.append([p[0] + trans[0], p[1] + trans[1]])
+    return translated_points
+
+
+def get_aligned_centroids(d_slice, trans, rot, mid):
+    sorted_keys = sorted(d_slice['fols'].keys())
+    centroids = get_centroid_list(d_slice['fols'])
+    rotated_centroids = rotate_by_rad(centroids, mid, rot)
+    translated_centroids = translate(rotated_centroids, trans)
+
+    if 'shifted_fols' in d_slice.keys():
+        my_dict = d_slice['shifted_fols']
+    else:
+        my_dict = {}
+
+    for i in range(len(sorted_keys)):
+        k = sorted_keys[i]
+        if k in my_dict.keys():
+            my_dict[k]['centroid'] = translated_centroids[i]
+        else:
+            my_dict[k] = {}
+            my_dict[k]['centroid'] = translated_centroids[i]
+
+    return my_dict
+
+
 class FolClicker(object):
     def __init__(self, slice_dict, img_dir=None):
         self.img_dir = img_dir
@@ -202,6 +219,8 @@ class FolClicker(object):
         self.curr_slice_key = [self.ordered_slice_keys[idx], self.ordered_slice_keys[idx + 1]]
         self.slice_dict[self.curr_slice_key[0]]['rot_rad'] = 0
         self.slice_dict[self.curr_slice_key[0]]['trans'] = [0, 0]
+        self.slice_dict[self.curr_slice_key[0]]['shifted_fols'] = \
+            copy.deepcopy(self.slice_dict[self.curr_slice_key[0]]['fols'])
 
         self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0]), 'gray')
         self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1]), 'gray')
@@ -288,11 +307,12 @@ class FolClicker(object):
                         [trans[0] + self.slice_dict[self.curr_slice_key[0]]['trans'][0],
                          trans[1] + self.slice_dict[self.curr_slice_key[0]]['trans'][1]]
                     self.slice_dict[self.curr_slice_key[1]]['mid'] = mid
+                    d = get_aligned_centroids(self.slice_dict[self.curr_slice_key[i]], trans, rot, mid)
+                    self.slice_dict[self.curr_slice_key[1]]['shifted_fols'] = d
 
                     plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
                     plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
-                    self.fig.canvas.draw()
-                    self.fig.canvas.flush_events()
+                    self.flush()
                     self.change_click_state(IDLE)
                     self.propagate_labels()
                     # self.change_click_state()
@@ -347,30 +367,68 @@ class FolClicker(object):
         # find closest LABELED centroid in left image to all centroids in right
         # if within thresh distance, adopt label
         # for all unlabeled points, check previous two slices
-        # TODO get shifted centroid list for both
-        cl = get_centroid_list(self.slice_dict[self.curr_slice_key[0]]['fols'])
-        cr = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['fols'])
+
+        # TODO make sure it doesn't overwrite labels you wanted to change
+        # TODO add no label 'na'
+
+        cl = get_centroid_list(self.slice_dict[self.curr_slice_key[0]]['shifted_fols'])
+        cr = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['shifted_fols'])
+        sorted_keys_l = sorted(self.slice_dict[self.curr_slice_key[0]]['shifted_fols'].keys())
+        sorted_keys_r = sorted(self.slice_dict[self.curr_slice_key[1]]['shifted_fols'].keys())
+
+        cd = cdist(cl, cl)
+        # remove diagonal entries (self distance), reshape to square array
+        # cd = cp[~np.eye(cp.shape[0], dtype=bool)].reshape(cp.shape[0], -1)
+        # cd = cp.min(axis=1)
+
+        idx=np.where((cd < SAME_FOL_DIST) & (cd != 0))
+
+        # [(array([5, 7], dtype=int64), array([7, 5], dtype=int64))]
+        #    label points on top of each other the same
+
+        for n in range(len(idx[0])):
+            k1 = sorted_keys_l[int(idx[0][n])]
+            k2 = sorted_keys_l[int(idx[1][n])]
+            if 'label' not in self.slice_dict[self.curr_slice_key[0]]['fols'][k1].keys():
+                if 'label' in self.slice_dict[self.curr_slice_key[0]]['fols'][k2].keys():
+                    self.slice_dict[self.curr_slice_key[0]]['fols'][k1]['label'] = \
+                        self.slice_dict[self.curr_slice_key[0]]['fols'][k2]['label']
+            elif 'label' not in self.slice_dict[self.curr_slice_key[0]]['fols'][k2].keys():
+                if 'label' in self.slice_dict[self.curr_slice_key[0]]['fols'][k1].keys():
+                    self.slice_dict[self.curr_slice_key[0]]['fols'][k2]['label'] = \
+                        self.slice_dict[self.curr_slice_key[0]]['fols'][k1]['label']
+
+           #
+           # for y in idx[1]:
+           #  for x in idx[0]:
+           #      k = sorted_keys_l[idx[0][x]]
+           #      if 'label' not in self.slice_dict[self.curr_slice_key[0]]['fols'][k].keys():
+           #          self.slice_dict[self.curr_slice_key[0]]['fols'][k]['label']
+
+
         cd = cdist(cl, cr)
         min_cols = cd.min(axis=0)  # distance to closest point in first slice to all points in second slice
         idx = []
         for m in min_cols:
-            idx.append(np.where(cd == m)[0])
+            idx.append(np.where(cd == m))
 
-        sorted_keys_l = sorted(self.slice_dict[self.curr_slice_key[0]]['fols'].keys())
-        sorted_keys_r = sorted(self.slice_dict[self.curr_slice_key[1]]['fols'].keys())
-
-        # TODO make sure it doesn't overwrite labels you wanted to change
-        # TODO add same label to label to centroids on top of each other
-        # TODO add no label 'na'
-        # TODO text on figure while labeling
-
-        for i in range(len(min_cols)):
-            if min_cols[i] < LABEL_THRESH:
-                kl = sorted_keys_l[int(idx[i])]
-                kr = sorted_keys_r[i]
+        for n in range(len(min_cols)):
+            if min_cols[n] < LABEL_THRESH:
+                if len(idx[n][0]) > 1:
+                    m = np.where(idx[n][1] == n)
+                    kl = sorted_keys_l[int(idx[n][0][m])]
+                else:
+                    kl = sorted_keys_l[int(idx[n][0])]
+                kr = sorted_keys_r[n]
                 if 'label' in self.slice_dict[self.curr_slice_key[0]]['fols'][kl].keys():
                     self.slice_dict[self.curr_slice_key[1]]['fols'][kr]['label'] = \
                         self.slice_dict[self.curr_slice_key[0]]['fols'][kl]['label']
+
+
+
+
+
+        # Plot
         for kr in sorted_keys_r:
             if 'label' in self.slice_dict[self.curr_slice_key[1]]['fols'][kr].keys():
                 point = self.slice_dict[self.curr_slice_key[1]]['fols'][kr]['centroid']
