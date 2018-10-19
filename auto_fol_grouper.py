@@ -1,5 +1,6 @@
 # TODO ESSENTIAL
-# TODO handle slices with less than two matching pairs
+# TODO handle slices with less than two matching pairs - press 'n', take rot and trans from prev
+#   in fact I should just default to taking prev unless they choose to Realign
 # TODO make executable
 
 # TODO WOULD BE NICE
@@ -22,7 +23,7 @@ INIT = 1
 MATCH_CENTROIDS = 2
 LABEL = 3
 
-# generate allowed labels 0:7, a:e
+# generate allowed labels
 LABELS = []
 for a in 'abcde':
     for i in range(1,8):
@@ -43,6 +44,87 @@ MARKERS[-1] = 'w.'
 P_TYPE = {}
 for i in range(len(LABELS)):
     P_TYPE[LABELS[i]] = MARKERS[i]
+
+
+def align_all(sd):
+    starting_slice_key = None
+
+    for k, v in sd.itervalues():
+        if v.attrs['rotation_origin'] == [0, 0]:
+            starting_slice_key = k
+
+    sorted_keys = sorted(sd.keys())
+
+    # Iterate from 0 to end
+    for k in range(sorted_keys.index(starting_slice_key)+1, len(sorted_keys) - 1):
+
+
+        # rotate current and previous slice to stored rot/trans
+        #   Previous slice will be new, current will be first pass
+        # Calculate midpoint of centroids for current slice
+        # Iterate over rotations
+        #   Iterate over centroids
+        #       Index of centroid in list will be same as corresponding follicle's index in sorted keys
+        #       Look for all follicles with same label in prev slice
+        #       Add average distace from centroid to matching centroids
+
+        # check for more than one centroid with same label in current slice and prev slice
+        #  maybe i should iterate over labels instead
+        #   if one or the other is missing be sure to not include in avg
+
+        # Index of centroid in list will be same as corresponding follicle's index in sorted keys
+
+
+
+        k_last = sorted_keys[k-1]
+        centroids_last = get_centroid_list(sd[k_last]['unaligned_folicles'])
+        centroids_last = rotate_by_rad(centroids_last, sd[k_last].attrs['rotation_radians'])
+        centroids_last = translate(points=centroids_last, trans=sd[k_last].attrs['translation'])
+
+
+        starting_rot = sd[k].attrs['rotation_radians']
+        starting_trans = sd[k].attrs['translation']
+        centroids = get_centroid_list(sd[k]['unaligned_folicles'])
+        centroids = translate(centroids, starting_trans)
+        mid = [0, 0]
+        for p in centroids:
+            mid[0] += p[0]
+            mid[1] += p[1]
+        mid[0] = mid[0]/len(centroids)
+        mid[1] = mid[1]/len(centroids)
+        centroids = rotate_by_rad(points=centroids, origin=mid, r=starting_rot) # should rotate before finding mid
+
+        error = []
+        rotation = []
+        mp = []
+
+        for r in range(-30, 30.1, .1):
+            rot = rotate_by_deg(points=centroids, origin=mid, r=r)
+            for p in rot:
+
+            error.append(my_dist(points[0][0], mp[0]) + my_dist(points[0][1], mp[1]))
+            rotation.append(r)
+
+
+        rad = rotation[error.index(min(error))]/10.
+        rad = np.radians(rad)
+
+
+
+
+class FolAligner(object):
+    def __init__(self, slice_dict, img_dir=None):
+
+        # set image directory
+        self.img_dir = img_dir
+        if not self.img_dir:
+            self.img_dir = os.getcwd()
+
+
+        # clean up slice dictionayr and add level for aligned/unaligned follicle data
+        self.slice_dict = slice_dict
+
+    def
 
 
 class FolClicker(object):
@@ -810,7 +892,7 @@ def get_contour(fol, key):
     contour = []
     if key in fol.keys():
         for n in range(len(fol[key][0])):
-            contour.append([fol[key][0][n], fol[key][0][n]])
+            contour.append([fol[key][0][n], fol[key][1][n]])
     return contour
 
 if __name__ == '__main__':
