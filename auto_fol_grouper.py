@@ -3,6 +3,20 @@
 #   in fact I should just default to taking prev unless they choose to Realign
 # TODO make executable
 
+
+# TODO display using alignment from left on right right press 'r' t realign
+# TODO Esc if
+# TODO based on assumption that they're close, dangerous assumption
+# TODO      maybe see if min of rot or trans is extreme value, go farther
+# TODO allow for manual alignment where you're not locked to centroids
+
+# TODO allow to mark and label follicles that were not caught by nicks code
+
+# TODO break up allign all into functions
+
+
+
+
 # TODO WOULD BE NICE
 # TODO make sure when relabeling left, right also gets relabeled
 # TODO make rotation between +- pi
@@ -46,18 +60,44 @@ for i in range(len(LABELS)):
     P_TYPE[LABELS[i]] = MARKERS[i]
 
 
-def align_all(sd):
+def get_labels(d_slice):
+
+    sorted_keys = sorted(d_slice)
+
+    labels = []
+
+    for k in sorted_keys:
+        labels.append(d_slice[k]['label'])
+
+    return labels
+
+def get_centroids_with_label(d_slice, l):
+    sorted_keys = sorted(d_slice)
+
+    centroids = []
+
+    for k in sorted_keys:
+        if d_slice[k]['label'] == l:
+            centroids.append(d_slice[k]['centroid'])
+
+    return centroids
+
+def align_all(sd, **kwargs):
     starting_slice_key = None
 
-    for k, v in sd.itervalues():
-        if v.attrs['rotation_origin'] == [0, 0]:
+    for k, v in sd.iteritems():
+        if v['mid'][0] == 0 and v['mid'][1] == 0:
+            print('starting: ' + str(k))
             starting_slice_key = k
 
     sorted_keys = sorted(sd.keys())
 
+    cnt = 0
     # Iterate from 0 to end
-    for k in range(sorted_keys.index(starting_slice_key)+1, len(sorted_keys) - 1):
+    for idx in range(sorted_keys.index(starting_slice_key)+1, len(sorted_keys)):
 
+        cnt += 1
+        print(str(cnt) + ' of ' + str(len(sorted_keys)))
 
         # rotate current and previous slice to stored rot/trans
         #   Previous slice will be new, current will be first pass
@@ -73,58 +113,346 @@ def align_all(sd):
         #   if one or the other is missing be sure to not include in avg
 
         # Index of centroid in list will be same as corresponding follicle's index in sorted keys
+        k = sorted_keys[idx]
+        k_last = sorted_keys[idx - 1]
+        slice_curr = sd[k]['aligned_fols']
+        slice_last = sd[k_last]['aligned_fols']
 
 
-
-        k_last = sorted_keys[k-1]
-        centroids_last = get_centroid_list(sd[k_last]['unaligned_folicles'])
-        centroids_last = rotate_by_rad(centroids_last, sd[k_last].attrs['rotation_radians'])
-        centroids_last = translate(points=centroids_last, trans=sd[k_last].attrs['translation'])
+        # centroids_last = get_centroid_list(slice_curr)
+        # centroids_last = rotate_by_rad(centroids_last, sd[k_last].attrs['rotation_radians'])
+        # centroids_last = translate(points=centroids_last, trans=sd[k_last].attrs['translation'])
 
 
-        starting_rot = sd[k].attrs['rotation_radians']
-        starting_trans = sd[k].attrs['translation']
-        centroids = get_centroid_list(sd[k]['unaligned_folicles'])
-        centroids = translate(centroids, starting_trans)
+        # starting_rot = sd[k].attrs['rotation_radians']
+        # starting_trans = sd[k].attrs['translation']
+        centroids = get_centroid_list(slice_curr)
+        # centroids = translate(centroids, starting_trans)
+        # centroids = rotate_by_rad(points=centroids, origin=mid, r=starting_rot)  # should rotate before finding mid
+
         mid = [0, 0]
         for p in centroids:
             mid[0] += p[0]
             mid[1] += p[1]
         mid[0] = mid[0]/len(centroids)
         mid[1] = mid[1]/len(centroids)
-        centroids = rotate_by_rad(points=centroids, origin=mid, r=starting_rot) # should rotate before finding mid
 
+        labels = get_labels(slice_curr)
+        labels_last = get_labels(slice_last)
         error = []
         rotation = []
         mp = []
+        # label_count = []
+        # label_last_count = []
+        # for x in len(LABELS):
+        #     label_count.append(labels.count(LABELS[x]))
+        #     label_last_count.append(labels_last.count(LABELS[x]))
 
-        for r in range(-30, 30.1, .1):
-            rot = rotate_by_deg(points=centroids, origin=mid, r=r)
-            for p in rot:
+        for r in range(-200, 2011):
+            # rot = rotate_by_deg(points=centroids, origin=mid, r=r)
+            error.append(0)
+            rotation.append(r/10.)
 
-            error.append(my_dist(points[0][0], mp[0]) + my_dist(points[0][1], mp[1]))
-            rotation.append(r)
+            for l in LABELS:
+                if l in labels and l in labels_last:
+                    labeled_centroids = get_centroids_with_label(slice_curr, l)
+                    labeled_centroids = rotate_by_deg(labeled_centroids, mid, r/10.)
 
+                    labeled_centroids_last = get_centroids_with_label(slice_last, l)
 
-        rad = rotation[error.index(min(error))]/10.
-        rad = np.radians(rad)
-
-
-
-
-class FolAligner(object):
-    def __init__(self, slice_dict, img_dir=None):
-
-        # set image directory
-        self.img_dir = img_dir
-        if not self.img_dir:
-            self.img_dir = os.getcwd()
+                    cd = cdist(labeled_centroids, labeled_centroids_last)
+                    error[-1] += np.mean(cd)
 
 
-        # clean up slice dictionayr and add level for aligned/unaligned follicle data
-        self.slice_dict = slice_dict
+        rot = np.radians(rotation[error.index(min(error))])
+        centroids = rotate_by_rad(points=centroids, origin=mid, r=rot)
 
-    def
+
+        error = []
+        translation = []
+
+        for tx in range(-200, 201):
+            print('translating tx:  ' + str(tx))
+            for ty in range(-200, 201):
+                error.append(0)
+                translation.append([tx, ty])
+
+                for l in LABELS:
+                    if l in labels and l in labels_last:
+                        labeled_centroids = get_centroids_with_label(slice_curr, l)
+                        labeled_centroids = translate(labeled_centroids, [tx, ty])
+
+                        labeled_centroids_last = get_centroids_with_label(slice_last, l)
+
+                        cd = cdist(labeled_centroids, labeled_centroids_last)
+                        error[-1] += np.mean(cd)
+
+        trans = translation[error.index(min(error))]
+
+        sd[k]['mid'].extend([mid[0], mid[1]])
+        sd[k]['rot_rad'] = [sd[k]['rot_rad'], rot]
+        sd[k]['trans'].extend(trans)
+
+
+
+
+
+
+        # get aligned contorurs
+        for s in sd.itervalues():
+            if 'aligned_fols' not in s.keys():
+                s['aligned_fols'] = {}
+            for key, f in s['aligned_fols'].iteritems():
+
+                # sorted_keys = sorted(s['fols'].keys())
+
+                contour = get_contour(f, 'outer')
+                rotated_contour = rotate_by_rad(contour, mid, rot)
+                translated_contour = translate(rotated_contour, trans)
+                reshaped_contour = [[], []]
+                for c in translated_contour:
+                    reshaped_contour[0].append(c[0])
+                    reshaped_contour[1].append(c[1])
+
+                if key not in s['aligned_fols'].keys():
+                    s['aligned_fols'][key] = {}
+                s['aligned_fols'][key]['outer'] = reshaped_contour
+
+                if 'inner' in f.keys():
+                    contour = get_contour(f, 'inner')
+                    if not contour:
+                        s['aligned_fols'][key]['inner'] = [[], []]
+                        break
+                    rotated_contour = rotate_by_rad(contour, mid, rot)
+                    translated_contour = translate(rotated_contour, trans)
+                    reshaped_contour = [[], []]
+                    for c in translated_contour:
+                        reshaped_contour[0].append(c[0])
+                        reshaped_contour[1].append(c[1])
+
+                    s['aligned_fols'][key]['inner'] = reshaped_contour
+
+        # Aligned centroids
+        fol_keys = sorted(slice_curr.keys())
+        for x in range(len(fol_keys)):
+
+            key = fol_keys[x]
+            c = centroids[x]
+
+            slice_curr[key]['centroid'] = c
+
+
+
+    # TODO HERE add in write_h5 after finish second half
+
+    for idx in range(sorted_keys.index(starting_slice_key) - 1, -1, -1):      # should double check this
+        cnt += 1
+        print(str(cnt) + ' of ' + str(len(sorted_keys)))
+
+        # rotate current and previous slice to stored rot/trans
+        #   Previous slice will be new, current will be first pass
+        # Calculate midpoint of centroids for current slice
+        # Iterate over rotations
+        #   Iterate over centroids
+        #       Index of centroid in list will be same as corresponding follicle's index in sorted keys
+        #       Look for all follicles with same label in prev slice
+        #       Add average distace from centroid to matching centroids
+
+        # check for more than one centroid with same label in current slice and prev slice
+        #  maybe i should iterate over labels instead
+        #   if one or the other is missing be sure to not include in avg
+
+        # Index of centroid in list will be same as corresponding follicle's index in sorted keys
+        k = sorted_keys[idx]
+        k_last = sorted_keys[idx - 1]
+        slice_curr = sd[k]['aligned_fols']
+        slice_last = sd[k_last]['aligned_fols']
+
+        # centroids_last = get_centroid_list(slice_curr)
+        # centroids_last = rotate_by_rad(centroids_last, sd[k_last].attrs['rotation_radians'])
+        # centroids_last = translate(points=centroids_last, trans=sd[k_last].attrs['translation'])
+
+
+        # starting_rot = sd[k].attrs['rotation_radians']
+        # starting_trans = sd[k].attrs['translation']
+        centroids = get_centroid_list(slice_curr)
+        # centroids = translate(centroids, starting_trans)
+        # centroids = rotate_by_rad(points=centroids, origin=mid, r=starting_rot)  # should rotate before finding mid
+
+        mid = [0, 0]
+        for p in centroids:
+            mid[0] += p[0]
+            mid[1] += p[1]
+        mid[0] = mid[0] / len(centroids)
+        mid[1] = mid[1] / len(centroids)
+
+        labels = get_labels(slice_curr)
+        labels_last = get_labels(slice_last)
+        error = []
+        rotation = []
+        mp = []
+        # label_count = []
+        # label_last_count = []
+        # for x in len(LABELS):
+        #     label_count.append(labels.count(LABELS[x]))
+        #     label_last_count.append(labels_last.count(LABELS[x]))
+
+        for r in range(-200, 2011):
+            # rot = rotate_by_deg(points=centroids, origin=mid, r=r)
+            error.append(0)
+            rotation.append(r / 10.)
+
+            for l in LABELS:
+                if l in labels and l in labels_last:
+                    labeled_centroids = get_centroids_with_label(slice_curr, l)
+                    labeled_centroids = rotate_by_deg(labeled_centroids, mid, r / 10.)
+
+                    labeled_centroids_last = get_centroids_with_label(slice_last, l)
+
+                    cd = cdist(labeled_centroids, labeled_centroids_last)
+                    error[-1] += np.mean(cd)
+
+        rot = np.radians(rotation[error.index(min(error))])
+        centroids = rotate_by_rad(points=centroids, origin=mid, r=rot)
+
+        error = []
+        translation = []
+
+        for tx in range(-200, 201):
+            print('translating tx:  ' + str(tx))
+            for ty in range(-200, 201):
+                error.append(0)
+                translation.append([tx, ty])
+
+                for l in LABELS:
+                    if l in labels and l in labels_last:
+                        labeled_centroids = get_centroids_with_label(slice_curr, l)
+                        labeled_centroids = translate(labeled_centroids, [tx, ty])
+
+                        labeled_centroids_last = get_centroids_with_label(slice_last, l)
+
+                        cd = cdist(labeled_centroids, labeled_centroids_last)
+                        error[-1] += np.mean(cd)
+
+        trans = translation[error.index(min(error))]
+
+        sd[k]['mid'].extend([mid[0], mid[1]])
+        sd[k]['rot_rad'] = [sd[k]['rot_rad'], rot]
+        sd[k]['trans'].extend(trans)
+
+        # get aligned contorurs
+        for s in sd.itervalues():
+            if 'aligned_fols' not in s.keys():
+                s['aligned_fols'] = {}
+            for key, f in s['aligned_fols'].iteritems():
+
+                # sorted_keys = sorted(s['fols'].keys())
+
+                contour = get_contour(f, 'outer')
+                rotated_contour = rotate_by_rad(contour, mid, rot)
+                translated_contour = translate(rotated_contour, trans)
+                reshaped_contour = [[], []]
+                for c in translated_contour:
+                    reshaped_contour[0].append(c[0])
+                    reshaped_contour[1].append(c[1])
+
+                if key not in s['aligned_fols'].keys():
+                    s['aligned_fols'][key] = {}
+                s['aligned_fols'][key]['outer'] = reshaped_contour
+
+                if 'inner' in f.keys():
+                    contour = get_contour(f, 'inner')
+                    if not contour:
+                        s['aligned_fols'][key]['inner'] = [[], []]
+                        break
+                    rotated_contour = rotate_by_rad(contour, mid, rot)
+                    translated_contour = translate(rotated_contour, trans)
+                    reshaped_contour = [[], []]
+                    for c in translated_contour:
+                        reshaped_contour[0].append(c[0])
+                        reshaped_contour[1].append(c[1])
+
+                    s['aligned_fols'][key]['inner'] = reshaped_contour
+
+        # Aligned centroids
+        fol_keys = sorted(slice_curr.keys())
+        for x in range(len(fol_keys)):
+            key = fol_keys[x]
+            c = centroids[x]
+
+            slice_curr[key]['centroid'] = c
+
+    # write h5
+    if 'title' in kwargs.keys():
+        title = kwargs['title']
+    else:
+        title = '_labeled.h5'
+
+    if 'destination_folder' in kwargs.keys():
+        destination_folder = kwargs['destination_folder']
+    else:
+        destination_folder = os.getcwd()
+
+    file_str = os.path.join(destination_folder, title)
+
+    with h5py.File(file_str, 'w') as pad:
+        for ks, s in sd.iteritems():
+            slide = pad.create_group(str(ks))
+            if 'img_dir' in kwargs.keys():
+                slide.attrs['unaligned_image_file'] = get_img_file(kwargs['img_dir'], ks)[0].split('\\')[-1]
+            slide.attrs['rotation_radians'] = s['rot_rad']
+            slide.attrs['rotation_origin'] = s['mid']
+            slide.attrs['translation'] = s['trans']
+
+            aligned = slide.create_group('aligned_folicles')
+            unaligned = slide.create_group('unaligned_folicles')
+
+            for kf, f in s['aligned_fols'].iteritems():
+                if f['label'] != 'xx':
+                    fol = aligned.create_group(str(kf))
+                    fol.attrs['label'] = f['label']
+                    fol.attrs['centroid'] = f['centroid']
+                    # fol.attrs['bbox'] = f['bbox']
+
+                    outer = fol.create_dataset('outer', shape=(len(f['outer'][0]), 2), dtype='float')
+                    outer[:, 0] = f['outer'][0]
+                    outer[:, 1] = f['outer'][1]
+
+                    inner = fol.create_dataset('inner', shape=(len(f['inner'][0]), 2), dtype='float')
+                    inner[:, 0] = f['inner'][0]
+                    inner[:, 1] = f['inner'][1]
+
+            for kf, f in s['fols'].iteritems():
+                if f['label'] != 'xx':
+                    fol = unaligned.create_group(str(kf))
+                    fol.attrs['label'] = f['label']
+                    fol.attrs['centroid'] = f['centroid']
+                    fol.attrs['bbox'] = f['bbox']
+
+                    outer = fol.create_dataset('outer', shape=(len(f['outer'][0]), 2), dtype='float')
+                    outer[:, 0] = f['outer'][0]
+                    outer[:, 1] = f['outer'][1]
+
+                    inner = fol.create_dataset('inner', shape=(len(f['inner'][0]), 2), dtype='float')
+                    inner[:, 0] = f['inner'][0]
+                    inner[:, 1] = f['inner'][1]
+
+
+
+
+# class FolAligner(object):
+#     def __init__(self, slice_dict, img_dir=None):
+#
+#         # set image directory
+#         self.img_dir = img_dir
+#         if not self.img_dir:
+#             self.img_dir = os.getcwd()
+#
+#
+#         # clean up slice dictionayr and add level for aligned/unaligned follicle data
+#         self.slice_dict = slice_dict
+#
+#     def
 
 
 class FolClicker(object):
@@ -301,6 +629,7 @@ class FolClicker(object):
                     self.fig.clear()
                     self.fig.suptitle('Writing Data')
                     self.flush()
+                    self.write_pckl()
                     self.write_h5()
                     self.fig.suptitle('Write Complete')
                     self.flush()
@@ -516,9 +845,9 @@ class FolClicker(object):
         :param kwargs:
         :return:
         """
-        self.get_aligned_fol()
-        self.get_aligned_bbox()
-        self.get_labels()
+        # self.get_aligned_fol()
+        # self.get_aligned_bbox()
+        # self.get_labels()
 
         if 'title' in kwargs.keys():
             title = kwargs['title']
@@ -572,6 +901,30 @@ class FolClicker(object):
                         inner = fol.create_dataset('inner', shape=(len(f['inner'][0]), 2), dtype='float')
                         inner[:, 0] = f['inner'][0]
                         inner[:, 1] = f['inner'][1]
+
+    def write_pckl(self, **kwargs):
+        self.get_aligned_fol()
+        self.get_aligned_bbox()
+        self.get_labels()
+
+
+        if 'title' in kwargs.keys():
+            title = kwargs['title']
+        else:
+            title = self.img_dir.split('\\')[-1] + '_labeled.pckl'
+
+        if 'destination_folder' in kwargs.keys():
+            destination_folder = kwargs['destination_folder']
+        else:
+            destination_folder = self.img_dir
+
+        file_str = os.path.join(destination_folder, title)
+
+
+        with open(file_str,'w') as fid:
+            pickle.dump(self.slice_dict,fid)
+
+
 
     def get_labels(self):
         """
@@ -642,6 +995,9 @@ class FolClicker(object):
                         reshaped_contour[1].append(c[1])
 
                     s['aligned_fols'][k]['inner'] = reshaped_contour
+
+
+
 
 
 def remove_bbox_centroids(sd):
