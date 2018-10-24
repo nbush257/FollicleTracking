@@ -20,6 +20,9 @@
 # TODO handle if there aren't matching centroids/ low numbers etc
 
 
+# TODO do labels in left stay when realign?
+
+
 
 # TODO WOULD BE NICE
 # TODO make sure when relabeling left, right also gets relabeled
@@ -40,6 +43,7 @@ IDLE = 0
 INIT = 1
 MATCH_CENTROIDS = 2
 LABEL = 3
+ALIGN = 4
 
 # generate allowed labels
 LABELS = []
@@ -171,7 +175,7 @@ def align_all(sd, **kwargs):
                         labeled_centroids_last = get_centroids_with_label(slice_last, l)
                         cd = cdist(labeled_centroids, labeled_centroids_last)
 
-                        error[-1] += np.mean(cd)**2
+                        error[-1] += np.mean(cd)*(int(l[-1])+1)
         print(min(error))
         print(error.count(min(error)))
         print(error.index(min(error)))
@@ -204,7 +208,7 @@ def align_all(sd, **kwargs):
                         labeled_centroids_last = get_centroids_with_label(slice_last, l)
 
                         cd = cdist(labeled_centroids, labeled_centroids_last)
-                        error[-1] += np.mean(cd)**2
+                        error[-1] += np.mean(cd)*(int(l[-1])+1)
 
         print(min(error))
         print(error.count(min(error)))
@@ -349,7 +353,7 @@ def align_all(sd, **kwargs):
                         labeled_centroids_last = get_centroids_with_label(slice_last, l)
                         cd = cdist(labeled_centroids, labeled_centroids_last)
 
-                        error[-1] += np.mean(cd)**2
+                        error[-1] += np.mean(cd) * (int(l[-1]) + 1)
         print(min(error))
         print(error.count(min(error)))
         print(error.index(min(error)))
@@ -380,7 +384,7 @@ def align_all(sd, **kwargs):
                         labeled_centroids_last = get_centroids_with_label(slice_last, l)
 
                         cd = cdist(labeled_centroids, labeled_centroids_last)
-                        error[-1] += np.mean(cd)**2
+                        error[-1] += np.mean(cd)*(int(l[-1])+1)
 
         print(min(error))
         print(error.count(min(error)))
@@ -561,6 +565,7 @@ class FolClicker(object):
         self.key_state = 0
         self.curr_label = ''
         self.centroids_to_align = [[], []]
+        self.points_to_align = [[], []]
         self.fol_to_label = None
         self.slice_to_label = None
         self.ordered_slice_keys = sorted(slice_dict)
@@ -602,7 +607,69 @@ class FolClicker(object):
             self.set_key_state(LABEL)
 
         else:   # sigle click
-            if self.click_state == MATCH_CENTROIDS:
+
+            if self.click_state == ALIGN:
+                if event.inaxes == self.ax_left:
+                    if len(self.points_to_align[0]) < 4:
+                        point = [event.ydata, event.xdata]
+                        self.points_to_align[0].append(point)
+                        if len(self.points_to_align[0]) == 1:
+                            color = 'r.'
+                        elif len(self.points_to_align[0]) == 2:
+                            color = 'b.'
+                        elif len(self.points_to_align[0]) == 3:
+                            color = 'g.'
+                        else:
+                            color = 'y.'
+                        plot_point(self.ax_left, point, color)
+                        self.flush()
+                elif event.inaxes == self.ax_right:
+                    if len(self.points_to_align[1]) < 4:
+                        point = [event.ydata, event.xdata]
+                        self.points_to_align[1].append(point)
+                        if len(self.points_to_align[1]) == 1:
+                            color = 'r.'
+                        elif len(self.points_to_align[1]) == 2:
+                            color = 'b.'
+                        elif len(self.points_to_align[1]) == 3:
+                            color = 'g.'
+                        else:
+                            color = 'y.'
+                        plot_point(self.ax_right, point, color)
+                        self.flush()
+
+
+                if len(self.points_to_align[0]) >= 4 and len(self.points_to_align[1]) >= 4:
+                    print('aligning')
+                    # points = [[],[]]
+                    # for i in range(2):
+                    #     for k in self.centroids_to_align[i]:
+                    #         points[i].append(self.slice_dict[self.curr_slice_key[i]]['fols'][k]['centroid'])
+                    trans, rot, mid = align_slices(self.points_to_align)
+                    print('finished aligning')
+                    self.slice_dict[self.curr_slice_key[1]]['rot_rad'] = \
+                        rot + self.slice_dict[self.curr_slice_key[0]]['rot_rad']
+                    self.slice_dict[self.curr_slice_key[1]]['trans'] = \
+                        [trans[0] + self.slice_dict[self.curr_slice_key[0]]['trans'][0],
+                         trans[1] + self.slice_dict[self.curr_slice_key[0]]['trans'][1]]
+                    self.slice_dict[self.curr_slice_key[1]]['mid'] = mid
+                    d = get_aligned_centroids(self.slice_dict[self.curr_slice_key[1]],
+                                              self.slice_dict[self.curr_slice_key[1]]['trans'],
+                                              self.slice_dict[self.curr_slice_key[1]]['rot_rad'],
+                                              self.slice_dict[self.curr_slice_key[1]]['mid'])
+                    self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
+                    self.ax_left.cla()
+                    self.ax_right.cla()
+                    self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
+                    self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+                    plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
+                    plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
+                    self.flush()
+                    self.set_click_state(IDLE)
+                    self.propagate_labels()
+
+
+            elif self.click_state == MATCH_CENTROIDS:
                 # when two points in each axis have been clicked, invoke procedure to find alignment, propegate labels,
                 #   plots all centroids and labels
                 if event.inaxes == self.ax_left:
@@ -716,10 +783,11 @@ class FolClicker(object):
                 self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                 self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
 
-                plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
-                plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
-
-                self.set_click_state(MATCH_CENTROIDS)
+                # plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
+                # plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
+                #
+                # self.set_click_state(MATCH_CENTROIDS)
+                self.set_click_state(ALIGN)
 
             elif event.key == 'n':
                 # TODO remove slice from dict
@@ -748,14 +816,42 @@ class FolClicker(object):
                 self.slice_dict[self.curr_slice_key[0]]['mid'] = [0, 0]
                 self.slice_dict[self.curr_slice_key[0]]['aligned_fols'] = \
                     copy.deepcopy(self.slice_dict[self.curr_slice_key[0]]['fols'])
+
+                self.ax_left.cla()
+                self.ax_right.cla()
                 self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                 self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+                plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
+                plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
 
-                plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
-                plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
+                self.slice_dict[self.curr_slice_key[1]]['rot_rad'] = self.slice_dict[self.curr_slice_key[0]]['rot_rad']
+                self.slice_dict[self.curr_slice_key[1]]['trans'] = [self.slice_dict[self.curr_slice_key[0]]['trans'][0],
+                                                                    self.slice_dict[self.curr_slice_key[0]]['trans'][1]]
+                self.slice_dict[self.curr_slice_key[1]]['mid'] = self.slice_dict[self.curr_slice_key[0]]['mid']
+                d = get_aligned_centroids(self.slice_dict[self.curr_slice_key[1]],
+                                          self.slice_dict[self.curr_slice_key[1]]['trans'],
+                                          self.slice_dict[self.curr_slice_key[1]]['rot_rad'],
+                                          self.slice_dict[self.curr_slice_key[1]]['mid'])
+                self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
 
-                self.set_click_state(MATCH_CENTROIDS)
-                self.set_key_state(IDLE)
+                self.flush()
+
+                self.set_click_state(IDLE)
+
+
+
+                # self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
+                # self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+                #
+                #
+                #
+                #
+                # # plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
+                # # plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
+                #
+                # # self.set_click_state(MATCH_CENTROIDS)
+                # self.set_click_state(ALIGN)
+                # self.set_key_state(IDLE)
 
 
     def put_text(self, text):
@@ -776,6 +872,9 @@ class FolClicker(object):
         if state == MATCH_CENTROIDS:
             self.centroids_to_align = [[], []]
             self.put_text('Click 2 pairs of matching centroids. Opposite corners are best.')
+        elif state == ALIGN:
+            self.points_to_align = [[], []]
+            self.put_text('Click 4 matching points')
 
         self.click_state = state
 
@@ -812,7 +911,7 @@ class FolClicker(object):
             if 'label' not in d.keys():
                 d['label'] = 'xx'
 
-        self.set_click_state(MATCH_CENTROIDS)
+        # self.set_click_state(MATCH_CENTROIDS)
 
         if self.slice_key_idx[1] >= len(self.ordered_slice_keys)-1:
             self.slice_key_idx = [self.start_idx, self.start_idx - 1]
@@ -828,16 +927,33 @@ class FolClicker(object):
         self.ax_left.cla()
         self.ax_right.cla()
 
-        self.curr_slice_key = [self.ordered_slice_keys[self.slice_key_idx[0]], self.ordered_slice_keys[self.slice_key_idx[1]]]
+        self.curr_slice_key = [self.ordered_slice_keys[self.slice_key_idx[0]],
+                               self.ordered_slice_keys[self.slice_key_idx[1]]]
 
         self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
         self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+        plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
+        plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
 
-        plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
-        plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
+        self.slice_dict[self.curr_slice_key[1]]['rot_rad'] = self.slice_dict[self.curr_slice_key[0]]['rot_rad']
+        self.slice_dict[self.curr_slice_key[1]]['trans'] = [self.slice_dict[self.curr_slice_key[0]]['trans'][0],
+                                                            self.slice_dict[self.curr_slice_key[0]]['trans'][1]]
+        self.slice_dict[self.curr_slice_key[1]]['mid'] = self.slice_dict[self.curr_slice_key[0]]['mid']
+        d = get_aligned_centroids(self.slice_dict[self.curr_slice_key[1]],
+                                  self.slice_dict[self.curr_slice_key[1]]['trans'],
+                                  self.slice_dict[self.curr_slice_key[1]]['rot_rad'],
+                                  self.slice_dict[self.curr_slice_key[1]]['mid'])
+        self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
 
-        self.set_click_state(MATCH_CENTROIDS)
+        self.propagate_labels()
 
+
+        # plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
+        # plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
+
+        # self.set_click_state(MATCH_CENTROIDS)
+        # self.set_click_state(ALIGN)
+        self.set_click_state(IDLE)
         return True
 
     def propagate_labels(self):
@@ -1233,37 +1349,67 @@ def align_slices(points):
     finds alignment for two slices based on 2 pairs of matching points
     lines up the midpoints of selected points from each slice, and finds rotation to minimize distace between
         matching points
+    first set of points comes from left img, second set from right image
     returns values to match second set slice to first
     :param points: [[[x00, y00],[x01, y01]], [[x10, y10],[x11, y11]]]
     :return: translation [x, y], rotation (radians), point about which second set was rotated
     """
-    midpoint1 = [(points[0][0][0] + points[0][1][0])/2., (points[0][0][1] + points[0][1][1])/2]
-    midpoint2 = [(points[1][0][0] + points[1][1][0]) / 2., (points[1][0][1] + points[1][1][1]) / 2]
-    trans = [midpoint1[0] - midpoint2[0], midpoint1[1] - midpoint2[1]]
+    # midpoint1 = [(points[0][0][0] + points[0][1][0])/2., (points[0][0][1] + points[0][1][1])/2]
+    # midpoint2 = [(points[1][0][0] + points[1][1][0]) / 2., (points[1][0][1] + points[1][1][1]) / 2]
+    # trans = [midpoint1[0] - midpoint2[0], midpoint1[1] - midpoint2[1]]
+    print('enter align')
+    mid = [[0, 0], [0, 0]]
+    print(points)
+    for sidx in range(2):
+        for p in points[sidx]:
+            mid[sidx][0] += p[0]
+            mid[sidx][1] += p[1]
+        mid[sidx][0] = mid[sidx][0]/float(len(points[sidx]))
+        mid[sidx][1] = mid[sidx][1] / float(len(points[sidx]))
 
+    print(mid)
+    trans = [mid[0][0] - mid[1][0], mid[0][1] - mid[1][1]]
+    print('fin calc mid')
+    rotations = []
     error = []
     for r in range(360):
-        rot = rotate_by_deg(points[1], midpoint2, r)
+        rotations.append(r)
+        rot = rotate_by_deg(points[1], mid[1], r)
         mp = []
+        error.append(0)
         for p in rot:
             mp.append([p[0] + trans[0], p[1] + trans[1]])
-        error.append(my_dist(points[0][0], mp[0]) + my_dist(points[0][1], mp[1]))
+        for x in range(len(mp)):
+            error[-1] += my_dist(mp[x], points[0][x])
 
-    rad = error.index(min(error))
+    print('first rot')
+
+        # error.append(my_dist(points[0][0], mp[0]) + my_dist(points[0][1], mp[1]))
+
+    rad = rotations[error.index(min(error))]
 
     error = []
-    rotation = []
+    rotations = []
     for r in range(rad*10-9, rad*10 +10):
-        rot = rotate_by_deg(points[1], midpoint2, r/10.)
+        rotations.append(r/10.)
+        error.append(0)
+        mp = []
+        rot = rotate_by_deg(points[1], mid[1], r/10.)
         for p in rot:
             mp.append([p[0] + trans[0], p[1] + trans[1]])
-        error.append(my_dist(points[0][0], mp[0]) + my_dist(points[0][1], mp[1]))
-        rotation.append(r)
+        for x in range(len(mp)):
+            error[-1] += (my_dist(mp[x], points[0][x]))
 
-    rad = rotation[error.index(min(error))]/10.
+    rad = rotations[error.index(min(error))]
     rad = np.radians(rad)
 
-    return trans, rad, midpoint2
+    return trans, rad, mid[1]
+
+
+
+
+
+
 
 
 def translate(points, trans):
