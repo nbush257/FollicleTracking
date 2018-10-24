@@ -22,6 +22,8 @@
 
 # TODO do labels in left stay when realign?
 
+# TODO add undo last added fol
+
 
 
 # TODO WOULD BE NICE
@@ -34,6 +36,7 @@ from helpers import *
 from scipy.spatial.distance import *
 import copy
 import h5py
+import datetime
 
 
 POINT_SIZE = 10
@@ -44,6 +47,7 @@ INIT = 1
 MATCH_CENTROIDS = 2
 LABEL = 3
 ALIGN = 4
+ADD = 5
 
 # generate allowed labels
 LABELS = []
@@ -551,6 +555,9 @@ class FolClicker(object):
         self.ax_left = self.fig.add_subplot(121)
         self.ax_right = self.fig.add_subplot(122)
 
+        self.disp = plt.figure(figsize=(7, 7))
+        self.ax_disp = self.disp.add_subplot(111)
+
         # attach mouse click and keypress events to fig
         self.cidb = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         self.cidk = self.fig.canvas.mpl_connect('key_press_event', self.on_key)
@@ -570,6 +577,17 @@ class FolClicker(object):
         self.slice_to_label = None
         self.ordered_slice_keys = sorted(slice_dict)
         self.ax_to_label = None
+        self.point_to_label = []
+
+        date_time = datetime.datetime.now()
+        time_str = str(date_time.time()).split('.')[0]  # Get string with just hh:mm:ss
+        time_str = time_str.replace(':', '-')  # Now hh-mm-ss
+        date_str = str(date_time.date())  # Date in format yyyy-mm-dd
+        self.date_time_str = '-'.join([date_str, time_str])
+
+        self.add_fol = {}
+        for k in self.slice_dict:
+            self.add_fol[k] = {}
 
         # get index of starting slice
         self.start_idx = int(len(self.ordered_slice_keys)) / 2
@@ -660,14 +678,39 @@ class FolClicker(object):
                     self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
                     self.ax_left.cla()
                     self.ax_right.cla()
+                    self.ax_disp.cla()
                     self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                     self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+                    self.ax_disp.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                     plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
                     plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
+                    plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[0]]['fols'], 'bo')
+
+                    c = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['fols'])
+                    c = rotate_by_rad(c, mid, rot)
+                    c = translate(c, trans)
+
+                    for p in c:
+                        plot_point(self.ax_disp, p, 'r.')
+
+                    # plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[1]]['aligned_fols'], 'r.')
                     self.flush()
                     self.set_click_state(IDLE)
                     self.propagate_labels()
+            #         TODO HERE HERE need to plot fols centroids from left and centroids shifted and rotated by
+            #         TODO      diff between left and right -- check what plot centroids does, i think I can jsut
+            #         TODO      get centroid list and plot point?
+            elif self.click_state == ADD:
+                if event.inaxes == self.ax_left:
+                    self.point_to_label = [event.ydata, event.xdata]
+                    self.slice_to_label = self.curr_slice_key[0]
+                    self.ax_to_label = self.ax_left
+                elif event.inaxes == self.ax_right:
+                    self.point_to_label = [event.ydata, event.xdata]
+                    self.ax_to_label = self.ax_right
+                    self.slice_to_label = self.curr_slice_key[1]
 
+                self.set_key_state(ADD)
 
             elif self.click_state == MATCH_CENTROIDS:
                 # when two points in each axis have been clicked, invoke procedure to find alignment, propegate labels,
@@ -761,13 +804,40 @@ class FolClicker(object):
                     self.set_key_state(IDLE)
                 else:
                     self.curr_label = ''
+                    self.put_text('Not a valid label. Try again.')
                     # TODO instructions
+        elif self.key_state == ADD:
+            self.curr_label += event.key
+            self.put_text(self.curr_label)
+            if len(self.curr_label) >= 2:
+                if self.curr_label in LABELS:
+                    if not self.add_fol[self.slice_to_label]:
+                        ka = 0
+                        self.add_fol[self.slice_to_label][0] = {}
+                    else:
+                        ka = sorted(self.add_fol[self.slice_to_label].keys())[-1] + 1
+                    self.add_fol[self.slice_to_label][ka] = {}
+                    self.add_fol[self.slice_to_label][ka]['centroid'] = self.point_to_label
+                    self.add_fol[self.slice_to_label][ka]['label'] = self.curr_label
+                    plot_point(self.ax_to_label, self.point_to_label, P_TYPE[self.curr_label])
+                    self.flush()
+                    self.curr_label = ''
+                else:
+                    self.put_text('Not a valid label. Aborting.')
+                    self.curr_label = ''
+                self.set_click_state(IDLE)
+                self.set_key_state(IDLE)
+
+
         elif self.key_state == IDLE:
             if event.key == ' ':    # next slide
                 if not self.next_slide():
                     self.fig.clear()
                     self.fig.suptitle('Writing Data')
                     self.flush()
+                    self.get_aligned_fol()
+                    self.get_aligned_bbox()
+                    self.get_labels()
                     self.write_pckl()
                     self.write_h5()
                     self.fig.suptitle('Write Complete')
@@ -779,15 +849,25 @@ class FolClicker(object):
                         del d['label']
                 self.ax_left.cla()
                 self.ax_right.cla()
+                # self.ax_disp.cla()
 
                 self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                 self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
-
+                # self.ax_disp.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
                 # plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'g.')
                 # plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'g.')
                 #
                 # self.set_click_state(MATCH_CENTROIDS)
                 self.set_click_state(ALIGN)
+            elif event.key == 'a':
+                self.set_click_state(ADD)
+
+            elif event.key == 'u':      # undo last added point
+                if self.add_fol[self.slice_to_label]:
+                    ka = sorted(self.add_fol[self.slice_to_label].keys())[-1]
+                    plot_point(self.ax_to_label, self.add_fol[self.slice_to_label][ka]['centroid'], 'k.')
+                    del self.add_fol[self.slice_to_label][ka]
+                    self.flush()
 
             elif event.key == 'n':
                 # TODO remove slice from dict
@@ -819,8 +899,10 @@ class FolClicker(object):
 
                 self.ax_left.cla()
                 self.ax_right.cla()
+                self.ax_disp.cla()
                 self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                 self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+                self.ax_disp.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                 plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
                 plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
 
@@ -834,9 +916,15 @@ class FolClicker(object):
                                           self.slice_dict[self.curr_slice_key[1]]['mid'])
                 self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
 
+                # cr = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['aligned_fols'])
+                # cl = get_centroid_list(self.slice_dict[self.curr_slice_key[0]]['fols'])
+                plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[0]]['aligned_fols'], 'bo')
+                plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[1]]['aligned_fols'], 'r.')
+
                 self.flush()
 
                 self.set_click_state(IDLE)
+                self.set_key_state(IDLE)
 
 
 
@@ -875,6 +963,8 @@ class FolClicker(object):
         elif state == ALIGN:
             self.points_to_align = [[], []]
             self.put_text('Click 4 matching points')
+        elif state == ADD:
+            self.put_text('Click location of folicle to add')
 
         self.click_state = state
 
@@ -886,6 +976,10 @@ class FolClicker(object):
         """
         if state == LABEL:
             self.put_text('Type 2 digit label.')
+            self.curr_label = ''
+        elif state == ADD:
+            self.put_text('Type 2 digit label.')
+            self.curr_label = ''
         elif state == INIT:
             self.fig.suptitle('Use left/right arrow keys to select starting follicle. Press SPACE to continue.')
             self.flush()
@@ -926,12 +1020,14 @@ class FolClicker(object):
 
         self.ax_left.cla()
         self.ax_right.cla()
+        self.ax_disp.cla()
 
         self.curr_slice_key = [self.ordered_slice_keys[self.slice_key_idx[0]],
                                self.ordered_slice_keys[self.slice_key_idx[1]]]
 
         self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
         self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+        self.ax_disp.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
         plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
         plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
 
@@ -944,6 +1040,9 @@ class FolClicker(object):
                                   self.slice_dict[self.curr_slice_key[1]]['rot_rad'],
                                   self.slice_dict[self.curr_slice_key[1]]['mid'])
         self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
+
+        plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[0]]['aligned_fols'], 'bo')
+        plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[1]]['aligned_fols'], 'r.')
 
         self.propagate_labels()
 
@@ -1025,6 +1124,8 @@ class FolClicker(object):
         """
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+        self.disp.canvas.draw()
+        self.disp.canvas.flush_events()
 
     def write_h5(self, **kwargs):
         """
@@ -1040,8 +1141,7 @@ class FolClicker(object):
         if 'title' in kwargs.keys():
             title = kwargs['title']
         else:
-            title = self.img_dir.split('\\')[-1] + '_labeled.h5'
-
+            title = self.img_dir.split('\\')[-1] + '_labeled_' + self.date_time_str + '.h5'
         if 'destination_folder' in kwargs.keys():
             destination_folder = kwargs['destination_folder']
         else:
@@ -1090,16 +1190,33 @@ class FolClicker(object):
                         inner[:, 0] = f['inner'][0]
                         inner[:, 1] = f['inner'][1]
 
-    def write_pckl(self, **kwargs):
-        self.get_aligned_fol()
-        self.get_aligned_bbox()
-        self.get_labels()
+        if 'add_title' in kwargs.keys():
+            title = kwargs['title']
+        else:
+            title = self.img_dir.split('\\')[-1] + '_missing_fols_' + self.date_time_str + '.h5'
+        if 'destination_folder' in kwargs.keys():
+            destination_folder = kwargs['destination_folder']
+        else:
+            destination_folder = self.img_dir
 
+        file_str = os.path.join(destination_folder, title)
+
+        with h5py.File(file_str, 'w') as pad:
+            for ks, s in self.add_fol.iteritems():
+                slide = pad.create_group(str(ks))
+                slide.attrs['unaligned_image_file'] = get_img_file(self.img_dir, ks)[0].split('\\')[-1]
+
+                for fk, f in s.iteritems():
+                    fol = slide.create_group(str(fk))
+                    fol.attrs['label'] = f['label']
+                    fol.attrs['centroid'] = f['centroid']
+
+    def write_pckl(self, **kwargs):
 
         if 'title' in kwargs.keys():
             title = kwargs['title']
         else:
-            title = self.img_dir.split('\\')[-1] + '_labeled.pckl'
+            title = self.img_dir.split('\\')[-1] + '_labeled_' + self.date_time_str + '.pckl'
 
         if 'destination_folder' in kwargs.keys():
             destination_folder = kwargs['destination_folder']
@@ -1113,6 +1230,20 @@ class FolClicker(object):
             pickle.dump(self.slice_dict,fid)
 
 
+        if 'add_title' in kwargs.keys():
+            title = kwargs['add_title']
+        else:
+            title = self.img_dir.split('\\')[-1] + '_missed_fols_' + self.date_time_str + '.pckl'
+
+        if 'destination_folder' in kwargs.keys():
+            destination_folder = kwargs['destination_folder']
+        else:
+            destination_folder = self.img_dir
+
+        file_str = os.path.join(destination_folder, title)
+
+        with open(file_str,'w') as fid:
+            pickle.dump(self.add_fol,fid)
 
     def get_labels(self):
         """
@@ -1357,9 +1488,7 @@ def align_slices(points):
     # midpoint1 = [(points[0][0][0] + points[0][1][0])/2., (points[0][0][1] + points[0][1][1])/2]
     # midpoint2 = [(points[1][0][0] + points[1][1][0]) / 2., (points[1][0][1] + points[1][1][1]) / 2]
     # trans = [midpoint1[0] - midpoint2[0], midpoint1[1] - midpoint2[1]]
-    print('enter align')
     mid = [[0, 0], [0, 0]]
-    print(points)
     for sidx in range(2):
         for p in points[sidx]:
             mid[sidx][0] += p[0]
@@ -1367,9 +1496,7 @@ def align_slices(points):
         mid[sidx][0] = mid[sidx][0]/float(len(points[sidx]))
         mid[sidx][1] = mid[sidx][1] / float(len(points[sidx]))
 
-    print(mid)
     trans = [mid[0][0] - mid[1][0], mid[0][1] - mid[1][1]]
-    print('fin calc mid')
     rotations = []
     error = []
     for r in range(360):
@@ -1382,7 +1509,6 @@ def align_slices(points):
         for x in range(len(mp)):
             error[-1] += my_dist(mp[x], points[0][x])
 
-    print('first rot')
 
         # error.append(my_dist(points[0][0], mp[0]) + my_dist(points[0][1], mp[1]))
 
