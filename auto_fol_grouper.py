@@ -1,33 +1,13 @@
 
 # TODO ESSENTIAL
-# TODO handle slices with less than two matching pairs - press 'n', take rot and trans from prev
-#   in fact I should just default to taking prev unless they choose to Realign
 # TODO make executable
-
-
-# TODO display using alignment from left on right right press 'r' t realign
-# TODO Esc if
-# TODO based on assumption that they're close, dangerous assumption
-# TODO      maybe see if min of rot or trans is extreme value, go farther
-# TODO allow for manual alignment where you're not locked to centroids
-
-# TODO allow to mark and label follicles that were not caught by nicks code
-
-# TODO break up allign all into functions
-
-# TODO original slice add second rot, trans, mid
-
-# TODO handle if there aren't matching centroids/ low numbers etc
-
-
-# TODO do labels in left stay when realign?
-
-# TODO add undo last added fol
-
+# TODO write import dict funciton
+# TODO figure out libs
+# TODO make jupyter notebook for chris
+# TODO write instructions for chris
 
 
 # TODO WOULD BE NICE
-# TODO make sure when relabeling left, right also gets relabeled
 # TODO make rotation between +- pi
 # TODO flesh out comments, maybe clean up code a little
 
@@ -658,13 +638,11 @@ class FolClicker(object):
 
 
                 if len(self.points_to_align[0]) >= 4 and len(self.points_to_align[1]) >= 4:
-                    print('aligning')
                     # points = [[],[]]
                     # for i in range(2):
                     #     for k in self.centroids_to_align[i]:
                     #         points[i].append(self.slice_dict[self.curr_slice_key[i]]['fols'][k]['centroid'])
                     trans, rot, mid = align_slices(self.points_to_align)
-                    print('finished aligning')
                     self.slice_dict[self.curr_slice_key[1]]['rot_rad'] = \
                         rot + self.slice_dict[self.curr_slice_key[0]]['rot_rad']
                     self.slice_dict[self.curr_slice_key[1]]['trans'] = \
@@ -696,6 +674,7 @@ class FolClicker(object):
                     # plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[1]]['aligned_fols'], 'r.')
                     self.flush()
                     self.set_click_state(IDLE)
+                    self.set_key_state(IDLE)
                     self.propagate_labels()
             #         TODO HERE HERE need to plot fols centroids from left and centroids shifted and rotated by
             #         TODO      diff between left and right -- check what plot centroids does, i think I can jsut
@@ -850,6 +829,10 @@ class FolClicker(object):
                 self.ax_left.cla()
                 self.ax_right.cla()
                 # self.ax_disp.cla()
+                # TODO HERE I think this line killed it
+                for f in self.slice_dict[self.curr_slice_key[1]]['fols'].itervalues():
+                    if 'label' in f.keys():
+                        del(f['label'])
 
                 self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
                 self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
@@ -868,6 +851,16 @@ class FolClicker(object):
                     plot_point(self.ax_to_label, self.add_fol[self.slice_to_label][ka]['centroid'], 'k.')
                     del self.add_fol[self.slice_to_label][ka]
                     self.flush()
+            elif event.key == 'l':
+                for f in self.slice_dict[self.curr_slice_key[1]]['fols'].itervalues():
+                    if 'label' in f.keys():
+                        del (f['label'])
+                for f in self.slice_dict[self.curr_slice_key[0]]['fols'].itervalues():
+                    if 'label' in f.keys():
+                        del (f['label'])
+                if not self.prev_slide():
+                    self.put_text('On first slide cannot go back')
+                    self.propagate_labels()
 
             elif event.key == 'n':
                 # TODO remove slice from dict
@@ -983,8 +976,55 @@ class FolClicker(object):
         elif state == INIT:
             self.fig.suptitle('Use left/right arrow keys to select starting follicle. Press SPACE to continue.')
             self.flush()
+        elif state == IDLE:
+            self.put_text('Double click to label. Fols labeled in left will propegate to unlabeled fols in right. '
+                          'Label "xx" to remove label. \nPress "r" to realign slices, "a" to add a missing follicle, '
+                          '"u" to undo last added follicle, SPACE to go to next slide.\nPress lowercase "L" to go back '
+                          'to previous slide. The other figure shows right centroids (red) plotted on top of left.')
 
         self.key_state = state
+
+    def prev_slide(self):
+        if self.slice_key_idx == [self.start_idx, self.start_idx - 1]: # just reached end and is went back to mid
+            self.slice_key_idx = [len(self.ordered_slice_keys)-2, len(self.ordered_slice_keys)-1]
+        elif self.slice_key_idx == [self.start_idx, self.start_idx + 1]: #starting
+            return False
+        elif self.slice_key_idx[0] < self.slice_key_idx[1]:
+            self.slice_key_idx[0] -= 1
+            self.slice_key_idx[1] -= 1
+        elif self.slice_key_idx[0] > self.slice_key_idx[1]:
+            self.slice_key_idx[0] += 1
+            self.slice_key_idx[1] += 1
+
+        self.ax_left.cla()
+        self.ax_right.cla()
+        self.ax_disp.cla()
+
+        self.curr_slice_key = [self.ordered_slice_keys[self.slice_key_idx[0]],
+                               self.ordered_slice_keys[self.slice_key_idx[1]]]
+
+        self.ax_left.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
+        self.ax_right.imshow(get_img_file(self.img_dir, self.curr_slice_key[1])[1], 'gray')
+        self.ax_disp.imshow(get_img_file(self.img_dir, self.curr_slice_key[0])[1], 'gray')
+        plot_centroids(self.ax_left, self.slice_dict[self.curr_slice_key[0]]['fols'], 'w.')
+        plot_centroids(self.ax_right, self.slice_dict[self.curr_slice_key[1]]['fols'], 'w.')
+        plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[0]]['fols'], 'bo')
+        mid = self.slice_dict[self.curr_slice_key[1]]['mid']
+        trans = self.slice_dict[self.curr_slice_key[1]]['trans']
+        ltrans = self.slice_dict[self.curr_slice_key[0]]['trans']
+        trans[0] -= ltrans[0]
+        trans[1] -= ltrans[1]
+        rot = self.slice_dict[self.curr_slice_key[1]]['rot_rad'] - self.slice_dict[self.curr_slice_key[0]]['rot_rad']
+        c = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['fols'])
+        c = rotate_by_rad(c, mid, rot)
+        c = translate(c, trans)
+        for p in c:
+            plot_point(self.ax_disp, p, 'r.')
+        self.set_click_state(IDLE)
+        self.set_key_state(IDLE)
+        self.flush()
+        self.propagate_labels()
+        return True
 
     def next_slide(self):
         """
@@ -1041,8 +1081,18 @@ class FolClicker(object):
                                   self.slice_dict[self.curr_slice_key[1]]['mid'])
         self.slice_dict[self.curr_slice_key[1]]['aligned_fols'] = d
 
-        plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[0]]['aligned_fols'], 'bo')
-        plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[1]]['aligned_fols'], 'r.')
+        plot_centroids(self.ax_disp, self.slice_dict[self.curr_slice_key[0]]['fols'], 'bo')
+        mid = self.slice_dict[self.curr_slice_key[1]]['mid']
+        trans = self.slice_dict[self.curr_slice_key[1]]['trans']
+        ltrans = self.slice_dict[self.curr_slice_key[0]]['trans']
+        trans[0] -= ltrans[0]
+        trans[1] -= ltrans[1]
+        rot = self.slice_dict[self.curr_slice_key[1]]['rot_rad'] - self.slice_dict[self.curr_slice_key[0]]['rot_rad']
+        c = get_centroid_list(self.slice_dict[self.curr_slice_key[1]]['fols'])
+        c = rotate_by_rad(c, mid, rot)
+        c = translate(c, trans)
+        for p in c:
+            plot_point(self.ax_disp, p, 'r.')
 
         self.propagate_labels()
 
@@ -1053,6 +1103,7 @@ class FolClicker(object):
         # self.set_click_state(MATCH_CENTROIDS)
         # self.set_click_state(ALIGN)
         self.set_click_state(IDLE)
+        self.set_key_state(IDLE)
         return True
 
     def propagate_labels(self):
