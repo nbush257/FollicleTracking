@@ -1,22 +1,22 @@
 
 # TODO ESSENTIAL
 # TODO make executable
-# TODO write import dict funciton
-# TODO figure out libs
-# TODO make jupyter notebook for chris
-# TODO write instructions for chris
-
 
 # TODO WOULD BE NICE
 # TODO make rotation between +- pi
 # TODO flesh out comments, maybe clean up code a little
 
-from fol_IO import *
-from helpers import *
+# from fol_IO import *
+# from helpers import *
+import cPickle as pickle
 from scipy.spatial.distance import *
 import copy
 import h5py
 import datetime
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from skimage import io
 
 
 POINT_SIZE = 10
@@ -51,6 +51,15 @@ P_TYPE = {}
 for i in range(len(LABELS)):
     P_TYPE[LABELS[i]] = MARKERS[i]
 
+def load_fol_data(fol_data_file):
+    '''
+    Wrapper that loads a slice dictionary in easily
+    :param fol_data_file: file to load
+    :return: data_dict -- The dictionary containing the tracked points of all the slices in a stack
+    '''
+    with open(fol_data_file,'r') as fid:
+        data_dict = pickle.load(fid)
+    return(data_dict)
 
 def get_labels(d_slice):
 
@@ -73,6 +82,7 @@ def get_centroids_with_label(d_slice, l):
             centroids.append(d_slice[k]['centroid'])
 
     return centroids
+
 
 def align_all(sd, **kwargs):
     starting_slice_key = None
@@ -127,128 +137,114 @@ def align_all(sd, **kwargs):
         centroids = get_centroid_list(slice_curr)
         # centroids = translate(centroids, starting_trans)
         # centroids = rotate_by_rad(points=centroids, origin=mid, r=starting_rot)  # should rotate before finding mid
+        if len(centroids) > 4:
+            mid = [0, 0]
+            for p in centroids:
+                mid[0] += p[0]
+                mid[1] += p[1]
+            mid[0] = mid[0]/len(centroids)
+            mid[1] = mid[1]/len(centroids)
 
-        mid = [0, 0]
-        for p in centroids:
-            mid[0] += p[0]
-            mid[1] += p[1]
-        mid[0] = mid[0]/len(centroids)
-        mid[1] = mid[1]/len(centroids)
+            labels = get_labels(slice_curr)
+            labels_last = get_labels(slice_last)
+            error = []
+            rotation = []
+            mp = []
+            # label_count = []
+            # label_last_count = []
+            # for x in len(LABELS):
+            #     label_count.append(labels.count(LABELS[x]))
+            #     label_last_count.append(labels_last.count(LABELS[x]))
 
-        labels = get_labels(slice_curr)
-        labels_last = get_labels(slice_last)
-        error = []
-        rotation = []
-        mp = []
-        # label_count = []
-        # label_last_count = []
-        # for x in len(LABELS):
-        #     label_count.append(labels.count(LABELS[x]))
-        #     label_last_count.append(labels_last.count(LABELS[x]))
-
-        for r in range(-1000, 1001):
-            # rot = rotate_by_deg(points=centroids, origin=mid, r=r)
-            error.append(0)
-            rotation.append(r/10.)
-
-            for l in LABELS:
-                if l != 'xx':
-                    if l in labels and l in labels_last:
-                        labeled_centroids = get_centroids_with_label(slice_curr, l)
-                        labeled_centroids = rotate_by_deg(labeled_centroids, mid, r/10.)
-                        labeled_centroids_last = get_centroids_with_label(slice_last, l)
-                        cd = cdist(labeled_centroids, labeled_centroids_last)
-
-                        error[-1] += np.mean(cd)*(int(l[-1])+1)
-        print(min(error))
-        print(error.count(min(error)))
-        print(error.index(min(error)))
-        print(rotation[error.index(min(error))])
-        rot = np.radians(rotation[error.index(min(error))])
-        centroids = rotate_by_rad(points=centroids, origin=mid, r=rot)
-
-        fol_keys = sorted(slice_curr.keys())
-        for x in range(len(fol_keys)):
-            key = fol_keys[x]
-            c = centroids[x]
-            slice_curr[key]['centroid'] = c
-
-
-
-        error = []
-        translation = []
-        # TODO rotate centroids in slice!!!
-        for tx in range(-60, 61):
-            # print('translating tx:  ' + str(tx))
-            for ty in range(-60, 61):
+            for r in range(-1000, 1001):
+                # rot = rotate_by_deg(points=centroids, origin=mid, r=r)
                 error.append(0)
-                translation.append([tx, ty])
+                rotation.append(r/10.)
 
                 for l in LABELS:
-                    if l in labels and l in labels_last:
-                        labeled_centroids = get_centroids_with_label(slice_curr, l)
-                        labeled_centroids = translate(labeled_centroids, [tx, ty])
+                    if l != 'xx':
+                        if l in labels and l in labels_last:
+                            labeled_centroids = get_centroids_with_label(slice_curr, l)
+                            labeled_centroids = rotate_by_deg(labeled_centroids, mid, r/10.)
+                            labeled_centroids_last = get_centroids_with_label(slice_last, l)
+                            cd = cdist(labeled_centroids, labeled_centroids_last)
+                            print('label: ' + l)
+                            error[-1] += np.mean(cd)*(20 - (int(l[-1])+1))
+            print(min(error))
+            print(error.count(min(error)))
+            print(error.index(min(error)))
+            print(rotation[error.index(min(error))])
+            rot = np.radians(rotation[error.index(min(error))])
+            centroids = rotate_by_rad(points=centroids, origin=mid, r=rot)
 
-                        labeled_centroids_last = get_centroids_with_label(slice_last, l)
+            fol_keys = sorted(slice_curr.keys())
+            for x in range(len(fol_keys)):
+                key = fol_keys[x]
+                c = centroids[x]
+                slice_curr[key]['centroid'] = c
 
-                        cd = cdist(labeled_centroids, labeled_centroids_last)
-                        error[-1] += np.mean(cd)*(int(l[-1])+1)
 
-        print(min(error))
-        print(error.count(min(error)))
-        print(error.index(min(error)))
-        print(translation[error.index(min(error))])
-        trans = translation[error.index(min(error))]
-        centroids = translate(centroids, trans)
-        sd[k]['mid'].extend([mid[0], mid[1]])
-        sd[k]['rot_rad'] = [sd[k]['rot_rad'], rot]
-        sd[k]['trans'].extend(trans)
 
-        error = []
-        rotation = []
+            error = []
+            translation = []
+            # TODO rotate centroids in slice!!!
+            for tx in range(-60, 61):
+                # print('translating tx:  ' + str(tx))
+                for ty in range(-60, 61):
+                    error.append(0)
+                    translation.append([tx, ty])
 
-        # for r in range(-100, 101):
-        #     # rot = rotate_by_deg(points=centroids, origin=mid, r=r)
-        #     error.append(0)
-        #     rotation.append(r/10.)
-        #
-        #     for l in LABELS:
-        #         if l != 'xx':
-        #             if l in labels and l in labels_last:
-        #                 labeled_centroids = get_centroids_with_label(slice_curr, l)
-        #                 labeled_centroids = rotate_by_deg(labeled_centroids, mid, r/10.)
-        #                 labeled_centroids_last = get_centroids_with_label(slice_last, l)
-        #                 cd = cdist(labeled_centroids, labeled_centroids_last)
-        #
-        #                 error[-1] += np.mean(cd)
-        #
-        #
-        # rot2 = np.radians(rotation[error.index(min(error))])
-        # centroids = rotate_by_rad(points=centroids, origin=mid, r=rot2)
+                    for l in LABELS:
+                        if l in labels and l in labels_last:
+                            labeled_centroids = get_centroids_with_label(slice_curr, l)
+                            labeled_centroids = translate(labeled_centroids, [tx, ty])
 
-        # rot += rot2
+                            labeled_centroids_last = get_centroids_with_label(slice_last, l)
 
-        # get aligned contorurs
-        s = sd[k]
-        for key, f in s['aligned_fols'].iteritems():
+                            cd = cdist(labeled_centroids, labeled_centroids_last)
+                            error[-1] += np.mean(cd)*(int(l[-1])+1)
 
-            # sorted_keys = sorted(s['fols'].keys())
+            print(min(error))
+            print(error.count(min(error)))
+            print(error.index(min(error)))
+            print(translation[error.index(min(error))])
+            trans = translation[error.index(min(error))]
+            centroids = translate(centroids, trans)
+            sd[k]['mid'].extend([mid[0], mid[1]])
+            sd[k]['rot_rad'] = [sd[k]['rot_rad'], rot]
+            sd[k]['trans'].extend(trans)
 
-            contour = get_contour(f, 'outer')
-            rotated_contour = rotate_by_rad(contour, mid, rot)
-            translated_contour = translate(rotated_contour, trans)
-            reshaped_contour = [[], []]
-            for c in translated_contour:
-                reshaped_contour[0].append(c[0])
-                reshaped_contour[1].append(c[1])
+            error = []
+            rotation = []
 
-            s['aligned_fols'][key]['outer'] = reshaped_contour
+            # for r in range(-100, 101):
+            #     # rot = rotate_by_deg(points=centroids, origin=mid, r=r)
+            #     error.append(0)
+            #     rotation.append(r/10.)
+            #
+            #     for l in LABELS:
+            #         if l != 'xx':
+            #             if l in labels and l in labels_last:
+            #                 labeled_centroids = get_centroids_with_label(slice_curr, l)
+            #                 labeled_centroids = rotate_by_deg(labeled_centroids, mid, r/10.)
+            #                 labeled_centroids_last = get_centroids_with_label(slice_last, l)
+            #                 cd = cdist(labeled_centroids, labeled_centroids_last)
+            #
+            #                 error[-1] += np.mean(cd)
+            #
+            #
+            # rot2 = np.radians(rotation[error.index(min(error))])
+            # centroids = rotate_by_rad(points=centroids, origin=mid, r=rot2)
 
-            if 'inner' in f.keys():
-                contour = get_contour(f, 'inner')
-                if not contour:
-                    s['aligned_fols'][key]['inner'] = [[], []]
-                    break
+            # rot += rot2
+
+            # get aligned contorurs
+            s = sd[k]
+            for key, f in s['aligned_fols'].iteritems():
+
+                # sorted_keys = sorted(s['fols'].keys())
+
+                contour = get_contour(f, 'outer')
                 rotated_contour = rotate_by_rad(contour, mid, rot)
                 translated_contour = translate(rotated_contour, trans)
                 reshaped_contour = [[], []]
@@ -256,16 +252,30 @@ def align_all(sd, **kwargs):
                     reshaped_contour[0].append(c[0])
                     reshaped_contour[1].append(c[1])
 
-                s['aligned_fols'][key]['inner'] = reshaped_contour
+                s['aligned_fols'][key]['outer'] = reshaped_contour
 
-        # Aligned centroids
-        fol_keys = sorted(slice_curr.keys())
-        for x in range(len(fol_keys)):
+                if 'inner' in f.keys():
+                    contour = get_contour(f, 'inner')
+                    if not contour:
+                        s['aligned_fols'][key]['inner'] = [[], []]
+                        break
+                    rotated_contour = rotate_by_rad(contour, mid, rot)
+                    translated_contour = translate(rotated_contour, trans)
+                    reshaped_contour = [[], []]
+                    for c in translated_contour:
+                        reshaped_contour[0].append(c[0])
+                        reshaped_contour[1].append(c[1])
 
-            key = fol_keys[x]
-            c = centroids[x]
+                    s['aligned_fols'][key]['inner'] = reshaped_contour
 
-            slice_curr[key]['centroid'] = c
+            # Aligned centroids
+            fol_keys = sorted(slice_curr.keys())
+            for x in range(len(fol_keys)):
+
+                key = fol_keys[x]
+                c = centroids[x]
+
+                slice_curr[key]['centroid'] = c
 
 
 
