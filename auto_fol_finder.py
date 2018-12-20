@@ -12,6 +12,7 @@ from skimage.measure import regionprops,EllipseModel
 import cPickle as pickle
 import os
 import sys
+import fol_IO
 
 
 class Follicle():
@@ -762,6 +763,8 @@ def batch_ims(p_load,p_save):
         with open(save_fname,'w') as fid:
             pickle.dump(fol_dict,fid)
 
+    return save_fname
+
 
 
 
@@ -774,7 +777,9 @@ if __name__=='__main__':
         p_save = sys.argv[2]
     else:
         p_save = p_load
-    batch_ims(p_load,p_save)
+    save_fname = batch_ims(p_load,p_save)
+    print('Finished tracking. Converting to slice dict.')
+    fol_IO.convert_fol_dict_file(save_fname)
 
 
 

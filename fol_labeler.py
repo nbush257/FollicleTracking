@@ -1,8 +1,10 @@
 
 # TODO ESSENTIAL
-# TODO make executable
+# TODO make main
+
 
 # TODO WOULD BE NICE
+
 # TODO make rotation between +- pi
 # TODO flesh out comments, maybe clean up code a little
 
@@ -17,6 +19,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from skimage import io
+import sys
 
 
 POINT_SIZE = 10
@@ -60,6 +63,21 @@ def load_fol_data(fol_data_file):
     with open(fol_data_file,'r') as fid:
         data_dict = pickle.load(fid)
     return(data_dict)
+
+
+def rename_images(dpath):
+    """
+    Change image names to prepend 'reg'
+    :param dpath: path to directory containing images
+    :return:
+    """
+    fnames = os.listdir(dpath)
+    fnames = [f for f in fnames if 'tif' in f]
+    fnames = [f for f in fnames if 'reg' not in f]
+
+    for f in fnames:
+        os.rename(os.path.join(dpath, f), os.path.join(dpath, 'reg' + f))
+
 
 def get_labels(d_slice):
 
@@ -1068,6 +1086,8 @@ class FolClicker(object):
             self.slice_key_idx[0] -= 1
             self.slice_key_idx[1] -= 1
 
+        print('\nPreparing slice ' + str(self.slice_key_idx[1]) + ' of ' + str(len(self.ordered_slice_keys)) + '...\t')
+
         self.ax_left.cla()
         self.ax_right.cla()
         self.ax_disp.cla()
@@ -1114,6 +1134,7 @@ class FolClicker(object):
         # self.set_click_state(ALIGN)
         self.set_click_state(IDLE)
         self.set_key_state(IDLE)
+        print('Ready.')
         return True
 
     def propagate_labels(self):
@@ -1148,6 +1169,8 @@ class FolClicker(object):
                 break
             sorted_keys_l = sorted(self.slice_dict[slice_key]['aligned_fols'].keys())
             cl = get_centroid_list(self.slice_dict[slice_key]['aligned_fols'])
+
+
             cd = cdist(cl, cr)
             min_cols = cd.min(axis=0)  # distance to closest point in first slice to all points in second slice
             idx = []
@@ -1390,7 +1413,7 @@ def remove_bbox_centroids(sd):
     for sk in sd:
         for fk in sd[sk]:
             if 'outer' in sd[sk][fk].keys():
-                if not (sd[sk][fk]['outer'] and sd[sk][fk]['centroid'].any()):
+                if not (sd[sk][fk]['outer'].any() and sd[sk][fk]['centroid'].any()):
                     to_del.append((sk, fk))
             else:
                 to_del.append((sk, fk))
@@ -1460,7 +1483,7 @@ def get_img_file(my_dir, key):
             f_name = f
 
     if f_name:
-        return f_name, io.imread(os.path.join(my_dir, f_name))
+        return f_name, io.imread(os.path.join(my_dir, f_name), as_gray=True)
     else:
         print('Image file not found')
         return None, None
@@ -1657,12 +1680,14 @@ def get_contour(fol, key):
     return contour
 
 if __name__ == '__main__':
-    # arg - directory with images/slice dict
-    # arg(optional) - title of h5 file
-    # arg(optional) - dir to store h5 file
-    # read in slice dict
-    # start tracker
-    pass
+    if len(sys.argv) < 3:
+        print('\nPass in path to slice_dict.pckl and path to directory containing images.')
+        sys.exit()
+
+    pckl_path = sys.argv[1]
+    img_dir = sys.argv[2]
+    sd = load_fol_data(pckl_path)
+    tracker = FolClicker(sd, img_dir)
 
 
 

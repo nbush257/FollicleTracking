@@ -5,7 +5,7 @@ import collections
 import sklearn
 import pandas as pd
 from scipy.spatial import distance
-from auto_fol_finder import Follicle
+# from auto_fol_finder import Follicle
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patches
